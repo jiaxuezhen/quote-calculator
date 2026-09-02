@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>报价计算器 · 定制包装 Quotation Calculator</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --card:#fff; --line:#e5e7eb; --text:#1f2937; --muted:#6b7280;
+    --accent:#2563eb; --accent2:#16a34a; --warn:#d97706; --danger:#dc2626;
+    --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",Segoe UI,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+  .wrap{max-width:960px;margin:0 auto;padding:20px 16px 60px}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 20px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;box-shadow:var(--shadow)}
+  .card h2{font-size:14px;margin:0 0 12px;color:var(--muted);font-weight:600;letter-spacing:.5px;text-transform:uppercase}
+  label{display:block;font-size:13px;font-weight:600;margin:12px 0 4px}
+  select,input[type=number],input[type=text]{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;background:#fff}
+  select:focus,input:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:var(--accent)}
+  .row{display:flex;gap:10px}.row>div{flex:1}
+  .addon{margin:6px 0}
+  .addon label{display:flex;align-items:center;gap:8px;font-weight:500;margin:0;cursor:pointer;font-size:13px}
+  .addon input{width:auto}
+  .hint{font-size:12px;color:var(--muted);margin-top:6px}
+  .tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;background:#fef3c7;color:#92400e;margin-left:6px}
+  /* result */
+  .result{background:linear-gradient(135deg,#1e3a5f,#2563eb);color:#fff;border:none}
+  .result h2{color:#cbd5e1}
+  .line{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed rgba(255,255,255,.18);font-size:14px}
+  .line:last-child{border:none}
+  .line .v{font-variant-numeric:tabular-nums}
+  .unit{font-size:12px;color:#cbd5e1}
+  .total{font-size:26px;font-weight:700;padding-top:10px}
+  .total .v{color:#fbbf24}
+  .unitprice{font-size:13px;color:#bfdbfe;margin-top:2px}
+  .warn-box{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:8px;padding:10px 12px;font-size:12px;margin-top:16px}
+  .notice{font-size:12px;color:var(--muted);margin-top:20px;border-top:1px solid var(--line);padding-top:12px}
+  .badge{font-size:12px;color:var(--warn)}
+  /* 数据库表 */
+  table#dbTable{width:100%;border-collapse:collapse;font-size:12.5px}
+  #dbTable th{position:sticky;top:0;background:#1e3a5f;color:#fff;padding:8px 10px;text-align:left;white-space:nowrap;z-index:1}
+  #dbTable td{padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+  #dbTable tr:nth-child(even) td{background:#fafbfc}
+  #dbTable tr:hover td{background:#eef2ff}
+  #dbTable td.ref{color:#d97706;font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>报价计算器 · 定制包装</h1>
+  <p class="sub">Quotation Calculator — 基础价(品类·尺寸·数量) + 工艺附加费 + 运费</p>
+
+  <div class="grid">
+    <!-- 左：配置 -->
+    <div>
+      <div class="card">
+        <h2>① 产品 & 规格</h2>
+        <label>产品品类</label>
+        <select id="product"></select>
+
+        <label>尺寸</label>
+        <select id="size"></select>
+        <div class="hint" id="sizeHint"></div>
+
+        <label id="qtyLabel">数量</label>
+        <select id="qty"></select>
+        <div class="hint" id="moqHint"></div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <h2>② 工艺附加费</h2>
+        <div id="addons"></div>
+        <div class="hint">勾选需要额外收费的工艺/印刷选项。</div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <h2>③ 运费</h2>
+        <label>当前规格运费规则</label>
+        <select id="freightMode">
+          <option value="manual">暂不计运费 / 手动输入</option>
+        </select>
+        <div class="hint" id="freightMatch">No exact freight record — manual quotation required</div>
+        <label>运费金额 (USD)</label>
+        <input type="number" id="freight" min="0" step="0.01" placeholder="0" value="0">
+        <div id="manualCalcBox" style="display:none;margin-top:10px">
+          <div class="row">
+            <div><label>重量 (kg)</label><input type="number" id="manualWeight" min="0.1" step="0.1" placeholder="输入重量"></div>
+            <div><label>运输方式</label><select id="manualMethod"><option value="air">空运</option><option value="sea">海运</option></select></div>
+          </div>
+          <div class="hint" id="manualCalcResult">空运：0.5kg=$20，超出每0.5kg+$6；海运：12kg=$45，超出每1kg+$3</div>
+        </div>
+        <div class="hint">运费仍可手动修改。实际成交前建议按目的国、体积重和当日渠道再次确认。</div>
+      </div>
+    </div>
+
+    <!-- 右：结果 -->
+    <div>
+      <div class="card result">
+        <h2>报价结果</h2>
+        <div class="line"><span>数量</span><span class="v" id="rQty">-</span></div>
+        <div class="line"><span>基础价（货值）</span><span class="v" id="rItems">$0.00</span></div>
+        <div class="line"><span>单价</span><span class="v" id="rUnit">$0.000 / 个</span></div>
+        <div class="line"><span>工艺附加费</span><span class="v" id="rAddon">$0.00</span></div>
+        <div class="line"><span>运费</span><span class="v" id="rFreight">$0.00</span></div>
+        <div class="line total"><span>合计</span><span class="v" id="rTotal">$0.00</span></div>
+        <div class="unitprice" id="rNote"></div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <h2>数据核对状态</h2>
+        <ul style="font-size:13px;margin:0;padding-left:18px;line-height:1.9">
+          <li>✅ 纸袋 — 准确数据（横5+竖6=11尺寸，44组价，含 inch，W×D×H）</li>
+          <li>✅ 邮寄盒 — 准确数据（去重后 9 尺寸，MOQ 50，含重量）</li>
+          <li>✅ 磁吸礼盒 — 准确数据（9 尺寸，$3.00–$7.20/pc，MOQ 20，L×W×H）</li>
+          <li>✅ 气泡袋 — 准确数据（19 尺寸，区间 Min–Max，MOQ 100/尺寸/色）</li>
+          <li>✅ 塑料快递袋 — 准确数据（7 尺寸，整批价，MOQ 100/尺寸/色）</li>
+          <li>✅ 缎面袋 — 准确数据（3 尺寸同价，含 logo，MOQ 30）</li>
+          <li>✅ 塑料袋 — 准确数据（冲孔+软提手两袋型，区间价，MOQ 100）</li>
+          <li>✅ 背心袋 — 准确数据（6 尺寸，缺尺寸按就近相似取价，标 原图/参考）</li>
+        </ul>
+        <div class="hint" style="margin-top:10px">✅ 8 个品类已全部录入准确数据。下一步：生成 Excel 报价数据库。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>📋 完整报价数据库（与 Excel 同源）</h2>
+    <div class="row">
+      <div><label>筛选品类</label><select id="dbProduct"></select></div>
+      <div><label>搜索（尺寸 / 袋型 / 用途）</label><input type="text" id="dbSearch" placeholder="如 25×20×7 / 冲孔 / T恤"></div>
+    </div>
+    <div class="hint" id="dbCount" style="margin:8px 0"></div>
+    <div style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:8px">
+      <table id="dbTable" cellspacing="0"></table>
+    </div>
+  </div>
+
+  <div class="notice">
+    说明：本页为独立测试版，数据源自 8 张报价单图片的 OCR 识别 + 语雀历史数据。最终逻辑将接入 Alibaba+Whatsapp 工具。
+    <br>公式：<b>合计 = 基础价(品类·尺寸·数量) + 工艺附加费 + 运费</b>
+  </div>
+</div>
+
+<script>
+// ================= 数据（源自价格表 OCR）=================
+const PRODUCTS = [
+  {
+    id:'paper_bag', name:'纸袋 Paper Bag', unit:'pcs', moq:100, mode:'tier',
+    note:'尺寸顺序：W×D×H；cm 为主键，inch 辅助；横版含自动空/海运',
+    sizes:[
+      {label:'横版 16×7×13cm (6.3×2.7×5.1")', cm:'16×7×13', p:{100:110,200:160,500:300,1000:450}},
+      {label:'横版 23×10×18cm (9×4×7")', cm:'23×10×18', p:{100:130,200:230,500:330,1000:480}},
+      {label:'横版 27×8×21cm (10.6×3.1×8.3")', cm:'27×8×21', p:{100:140,200:250,500:350,1000:500}},
+      {label:'横版 32×11.5×26cm (12.6×4.5×10.2")', cm:'32×11.5×26', p:{100:190,200:290,500:410,1000:550}},
+      {label:'横版 42×14×32cm (16.5×5.5×12.6")', cm:'42×14×32', p:{100:270,200:420,500:610,1000:910}},
+      {label:'竖版 14×7×15cm (5.5×2.7×5.9")', p:{100:110,200:160,500:300,1000:450}},
+      {label:'竖版 15×6×20cm (5.9×2.4×7.9")', p:{100:120,200:180,500:330,1000:480}},
+      {label:'竖版 20×9.5×28cm (7.9×4×11")', p:{100:150,200:260,500:350,1000:500}},
+      {label:'竖版 28×10×33cm (11×4×13")', p:{100:180,200:300,500:450,1000:560}},
+      {label:'竖版 28×15×35cm (11×6×13.8")', p:{100:220,200:320,500:460,1000:620}},
+      {label:'竖版 30×12×39.5cm (11.8×4.7×15.7")', p:{100:240,200:340,500:480,1000:650}},
+    ],
+    addons:[
+      {id:'rope', label:'绳提手 (rope handle)', price:0, per:'quote'},
+      {id:'ribbon', label:'缎带/蝴蝶结 (ribbon & bow)', price:0, per:'quote'},
+      {id:'foil', label:'烫金 (foil stamping +$30/次)', price:30},
+    ]
+  },
+  {
+    id:'mailer_box', name:'邮寄盒 Mailer Box', unit:'pcs', moq:50, mode:'tier',
+    sizes:[
+      {label:'13×13×3 cm', kg:'6kg', perPieceW:0.12, p:{50:120,100:180,200:290,500:400}},
+      {label:'15×10×4 cm', kg:'6kg', perPieceW:0.12, p:{50:120,100:180,200:290,500:400}},
+      {label:'15×15×5 cm', kg:'7kg', perPieceW:0.14, p:{50:120,100:180,200:290,500:400}},
+      {label:'20×14×4 cm', kg:'9kg', perPieceW:0.18, p:{50:120,100:180,200:290,500:400}},
+      {label:'25×20×7 cm', kg:'13kg', perPieceW:0.26, p:{50:180,100:270,200:370,500:590}},
+      {label:'27×16.5×5 cm', kg:'12kg', perPieceW:0.24, p:{50:180,100:270,200:370,500:590}},
+      {label:'33×23×5 cm', kg:'15kg', perPieceW:0.30, p:{50:180,100:270,200:370,500:590}},
+      {label:'36×25×12 cm', kg:'28kg', perPieceW:0.56, p:{50:250,100:580,200:770,500:1120}},
+      {label:'40×28.5×6 cm', kg:'28kg', perPieceW:0.56, p:{50:270,100:450,200:650,500:850}},
+    ],
+    addons:[
+      {id:'print', label:'定制印刷', price:0, per:'quote'},
+      {id:'laminate', label:'覆膜', price:0, per:'quote'},
+    ]
+  },
+  {
+    id:'magnetic_box', name:'磁吸礼盒 Magnetic Gift Box', unit:'pcs', moq:20, mode:'unit',
+    note:'按个计价（单价 × 数量，$3.00 是单价不是总价）；尺寸 L×W×H；重量按 50pcs 计',
+    sizes:[
+      {label:'15×10×5cm', kg:'9kg/50pcs', u:3.00, perPieceW:0.18},
+      {label:'16×10×10cm', kg:'16kg/50pcs', u:3.50, perPieceW:0.32},
+      {label:'20×18×7.5cm', kg:'19kg/50pcs', u:4.00, perPieceW:0.38},
+      {label:'25×20×10cm', kg:'23kg/50pcs', u:4.50, perPieceW:0.46},
+      {label:'27×22×8cm', kg:'21kg/50pcs', u:4.60, perPieceW:0.42},
+      {label:'29×21×7.5cm', kg:'22kg/50pcs', u:4.80, perPieceW:0.44, cm:'29×21×7.5'},
+      {label:'28×20×15cm', kg:'27kg/50pcs', u:5.20, perPieceW:0.54},
+      {label:'30×30×10cm', kg:'31kg/50pcs', u:5.60, perPieceW:0.62},
+      {label:'38×30.5×11.5cm', kg:'31kg/50pcs', u:7.20, perPieceW:0.62},
+    ],
+    addons:[
+      {id:'foil', label:'烫金 (gold foil +$30/次)', price:30},
+      {id:'silk', label:'丝绸内衬 (silk lining)', price:50, per:'/次(参考)'},
+      {id:'emboss', label:'击凸 (embossing)', price:0, per:'quote'},
+    ]
+  },
+  {
+    id:'bubble_mailer', name:'气泡袋 Bubble Mailer', unit:'pcs', moq:100, mode:'range',
+    note:'整批售价区间（Min–Max），此处取中值；MOQ 100pcs/尺寸/色',
+    sizes:[
+      {label:'#1 11×15cm', perPieceW:0.01, p:{100:[70,80],250:[120,160],500:[180,220],1000:[280,320]}},
+      {label:'#2 13×15cm', perPieceW:0.012, p:{100:[70,80],250:[120,160],500:[180,220],1000:[280,320]}},
+      {label:'#3 13×18cm', perPieceW:0.014, p:{100:[70,80],250:[120,160],500:[180,220],1000:[280,320]}},
+      {label:'#4 15×18cm', perPieceW:0.016, p:{100:[70,80],250:[120,160],500:[180,220],1000:[280,320]}},
+      {label:'#5 15×20cm', perPieceW:0.018, p:{100:[70,80],250:[120,160],500:[180,220],1000:[280,320]}},
+      {label:'#6 18×20cm', perPieceW:0.02, p:{100:[80,100],250:[160,200],500:[220,240],1000:[320,340]}},
+      {label:'#7 18×23cm', perPieceW:0.022, p:{100:[80,100],250:[160,200],500:[220,240],1000:[320,340]}},
+      {label:'#8 20×23cm', perPieceW:0.024, p:{100:[80,100],250:[160,200],500:[220,240],1000:[320,340]}},
+      {label:'#9 23×28cm', perPieceW:0.03, p:{100:[80,100],250:[160,200],500:[220,240],1000:[320,340]}},
+      {label:'#10 23×30cm', perPieceW:0.032, p:{100:[80,100],250:[160,200],500:[220,240],1000:[320,340]}},
+      {label:'#11 25×30cm', perPieceW:0.034, p:{100:[100,120],250:[200,240],500:[260,320],1000:[340,650]}},
+      {label:'#12 30×38cm', perPieceW:0.05, p:{100:[100,120],250:[200,240],500:[260,320],1000:[340,650]}},
+      {label:'#13 30×45cm', perPieceW:0.058, p:{100:[100,120],250:[200,240],500:[260,320],1000:[340,650]}},
+      {label:'#14 32×38cm', perPieceW:0.052, p:{100:[100,120],250:[200,240],500:[260,320],1000:[340,650]}},
+      {label:'#15 35×38cm', perPieceW:0.056, p:{100:[100,120],250:[200,240],500:[260,320],1000:[340,650]}},
+      {label:'#16 35×45cm', perPieceW:0.066, p:{100:[120,140],250:[240,280],500:[330,450],1000:[650,850]}},
+      {label:'#17 40×45cm', perPieceW:0.072, p:{100:[120,140],250:[240,280],500:[330,450],1000:[650,850]}},
+      {label:'#18 40×50cm', perPieceW:0.078, p:{100:[120,140],250:[240,280],500:[330,450],1000:[650,850]}},
+      {label:'#19 50×60cm', perPieceW:0.11, p:{100:[120,140],250:[240,280],500:[330,450],1000:[650,850]}},
+    ],
+    addons:[
+      {id:'customlogo', label:'定制 logo 印刷', price:0, per:'quote (按logo大小/色数/覆盖)'},
+    ]
+  },
+  {
+    id:'poly_mailer', name:'塑料快递袋 Poly Mailer', unit:'pcs', moq:100, mode:'tier',
+    note:'整批卖价（非单价）；"+4/+5" 为袋口翻边规格；MOQ 100/尺寸/色',
+    sizes:[
+      {label:'17×26+4cm', perPieceW:0.005, p:{100:80,250:120,500:220,1000:260}},
+      {label:'25.5×33+4cm', perPieceW:0.009, p:{100:90,250:140,500:240,1000:280}},
+      {label:'28×38+4cm', perPieceW:0.012, p:{100:100,250:150,500:260,1000:330}},
+      {label:'32×41+4cm', perPieceW:0.015, p:{100:100,250:150,500:260,1000:330}},
+      {label:'38×48+4cm', perPieceW:0.02, p:{100:110,250:160,500:270,1000:450}},
+      {label:'45×55+5cm', perPieceW:0.027, p:{100:110,250:240,500:280,1000:420}},
+      {label:'60×65+5cm', perPieceW:0.043, p:{100:140,250:280,500:360,1000:600}},
+    ],
+    addons:[
+      {id:'customlogo', label:'定制 logo 印刷', price:0, per:'quote (按logo大小/色数/覆盖)'},
+    ]
+  },
+  {
+    id:'satin_bag', name:'缎面抽绳袋 Satin Bag', unit:'pcs', moq:30, mode:'tier',
+    note:'含 logo 印刷；3 尺寸同价；多色可选（图未列具体色名）',
+    sizes:[
+      {label:'18×30cm', perPieceW:0.015, p:{30:75,50:115,100:200}},
+      {label:'23×30cm', perPieceW:0.018, p:{30:75,50:115,100:200}},
+      {label:'25×35cm', perPieceW:0.022, p:{30:75,50:115,100:200}},
+    ],
+    addons:[]
+  },
+  {
+    id:'plastic_bag', name:'塑料袋 Plastic Bag', unit:'pcs', moq:100, mode:'range',
+    note:'含 1色/1面印刷；分冲孔袋/软提手袋两种，报价必选袋型；软提手仅 #1–#4 有价（≤30×40cm），更大需人工确认',
+    sizes:[
+      {label:'冲孔 #1-2 (15×20~20×30cm)', perPieceW:0.005, p:{100:[55,60],250:[110,120],500:[180,190],1000:[300,310]}},
+      {label:'冲孔 #3-4 (25×35~30×40cm)', perPieceW:0.01, p:{100:[65,70],250:[130,140],500:[200,210],1000:[320,330]}},
+      {label:'冲孔 #5-6 (35×45~40×50cm)', perPieceW:0.017, p:{100:[80,90],250:[150,170],500:[220,240],1000:[340,360]}},
+      {label:'冲孔 #7-8 (45×55~50×60cm)', perPieceW:0.025, p:{100:[100,110],250:[190,210],500:[260,280],1000:[390,420]}},
+      {label:'软提手 #1-2 (15×20~20×30cm)', perPieceW:0.005, p:{100:[80,90],250:[150,170],500:[250,270],1000:[420,450]}},
+      {label:'软提手 #3-4 (25×35~30×40cm)', perPieceW:0.01, p:{100:[100,120],250:[190,220],500:[300,340],1000:[500,560]}},
+    ],
+    addons:[
+      {id:'addcolor', label:'加一色 (Additional Color +$15)', price:15},
+      {id:'side2', label:'双面印刷 (Second Side +$15)', price:15},
+      {id:'dblcolor', label:'双色印刷 (Double Color +$25)', price:25},
+      {id:'pantone', label:'定制潘通色 (Custom Pantone)', price:0, per:'quote'},
+      {id:'thick', label:'加厚 (Thickness Upgrade)', price:0, per:'quote'},
+    ]
+  },
+  {
+    id:'vest_bag', name:'塑料背心袋 Vest Bag', unit:'pcs', moq:2000, mode:'tier',
+    note:'含 1色/1面印刷；缺尺寸按"就近相似尺寸"取价（标注 参考）',
+    sizes:[
+      {label:'20×30cm（原图价）', perPieceW:0.003, src:'original', p:{2000:89,5000:115,10000:179,20000:279}},
+      {label:'25×40cm（参考 28×45）', perPieceW:0.007, src:'reference', ref:'28×45', p:{2000:109,5000:159,10000:269,20000:479}},
+      {label:'28×45cm（原图价）', perPieceW:0.007, src:'original', p:{2000:109,5000:159,10000:269,20000:479}},
+      {label:'30×48cm（参考 28×45）', perPieceW:0.009, src:'reference', ref:'28×45', p:{2000:109,5000:159,10000:269,20000:479}},
+      {label:'35×55cm（原图价）', perPieceW:0.011, src:'original', p:{2000:139,5000:229,10000:389,20000:699}},
+      {label:'40×60cm（参考 35×55）', perPieceW:0.013, src:'reference', ref:'35×55', p:{2000:139,5000:229,10000:389,20000:699}},
+    ],
+    addons:[
+      {id:'addcolor', label:'加一印刷色', price:0, per:'quote'},
+      {id:'side2', label:'双面印刷', price:0, per:'quote'},
+      {id:'thick', label:'加厚升级', price:0, per:'quote'},
+    ]
+  },
+];
+
+// （旧的区域运费逻辑已移除，改为按尺寸×数量自动计算空/海运）
+
+// ================= 状态 =================
+let curProduct = null, curSize = null, curQty = null;
+
+const $ = id => document.getElementById(id);
+const fmt = n => '$' + Number(n).toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2});
+
+function buildProductSelect(){
+  const sel = $('product');
+  sel.innerHTML = PRODUCTS.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  sel.onchange = onProduct;
+  onProduct();
+}
+
+function onProduct(){
+  curProduct = PRODUCTS.find(p=>p.id === $('product').value);
+  // size
+  const ss = $('size');
+  ss.innerHTML = curProduct.sizes.map((s,i)=>`<option value="${i}">${s.label}</option>`).join('');
+  $('sizeHint').textContent = curProduct.note || '';
+  // qty
+  const qs = $('qty');
+  if(curProduct.mode === 'unit'){
+    $('qtyLabel').textContent = '数量 (输入，MOQ ' + curProduct.moq + ')';
+    qs.outerHTML = '<input type="number" id="qty" min="'+curProduct.moq+'" step="1" value="'+curProduct.moq+'">';
+    $('qty').oninput = rebuildFreight;
+  }else{
+    $('qtyLabel').textContent = '数量 (MOQ ' + curProduct.moq + ')';
+    qs.outerHTML = '<select id="qty"></select>';
+    const first = curProduct.sizes[0];
+    const tiers = curProduct.mode==='tier' ? Object.keys(first.p).map(Number).sort((a,b)=>a-b) : Object.keys(first.p).map(Number).sort((a,b)=>a-b);
+    $('qty').innerHTML = tiers.map(t=>`<option value="${t}">${t} pcs</option>`).join('');
+    $('qty').onchange = rebuildFreight;
+  }
+  $('moqHint').textContent = 'MOQ: ' + curProduct.moq + ' ' + curProduct.unit + '（低于MOQ单价会上浮）';
+  // addons
+  const ad = $('addons');
+  ad.innerHTML = curProduct.addons.map(a=>{
+    const priceTxt = a.per ? ('（'+a.per+'）') : ('+$'+a.price);
+    return `<div class="addon"><label><input type="checkbox" data-price="${a.price||0}" data-per="${a.per?1:0}"> ${a.label} ${priceTxt}</label></div>`;
+  }).join('');
+  Array.from(ad.querySelectorAll('input')).forEach(c=>c.onchange=calc);
+  ss.onchange = ()=>{ curSize=+ss.value; rebuildFreight(); };
+  curSize = 0;
+  rebuildFreight();
+}
+
+function getPrice(sizeObj, qty){
+  if(curProduct.mode === 'unit'){
+    return sizeObj.u * qty;
+  }
+  if(curProduct.mode === 'range'){
+    const r = sizeObj.p[qty];
+    return (r[0]+r[1])/2; // 取中值
+  }
+  return sizeObj.p[qty] || null;
+}
+
+const FREIGHT_MODEL = { air: 10.65, seaBase: 32.27, seaKg: 2.04 };
+
+// ============ 独立运费规则库（真实历史运费）============
+// 结构：productId -> 尺寸(cm) -> 数量 -> { w:重量kg, air:空运$, sea:海运$ }
+// 以后新增真实运费，只需往这里加，不动报价核心代码。
+const FREIGHT_RULES = {
+  paper_bag: {
+    "16×7×13": {"50":{w:4,air:38,sea:null},"100":{w:6,air:62,sea:null},"200":{w:12,air:128,sea:42},"500":{w:30,air:328,sea:92},"1000":{w:60,air:null,sea:172}},
+    "23×10×18": {"50":{w:4,air:46,sea:null},"100":{w:8,air:86,sea:null},"200":{w:16,air:176,sea:52},"500":{w:40,air:null,sea:120},"1000":{w:80,air:null,sea:206}},
+    "27×8×21": {"50":{w:5,air:56,sea:null},"100":{w:10,air:108,sea:null},"200":{w:20,air:216,sea:66},"500":{w:50,air:null,sea:139},"1000":{w:100,air:null,sea:242}},
+    "32×11.5×26": {"50":{w:6.5,air:69,sea:null},"100":{w:13,air:142,sea:null},"200":{w:26,air:null,sea:82},"500":{w:65,air:null,sea:179},"1000":{w:130,air:null,sea:298}},
+    "42×14×32": {"50":{w:9.5,air:99,sea:null},"100":{w:19,air:null,sea:58},"200":{w:38,air:null,sea:118},"500":{w:95,air:null,sea:232},"1000":{w:190,air:null,sea:397}},
+  },
+  magnetic_box: {
+    "29×21×7.5": {"30":{w:15,air:152,sea:52},"50":{w:22,air:232,sea:76},"100":{w:44,air:462,sea:136}},
+  },
+};
+
+function deriveAir(w){ return Math.round(FREIGHT_MODEL.air * w); }
+function deriveSea(w){ return Math.round(FREIGHT_MODEL.seaBase + FREIGHT_MODEL.seaKg * w); }
+
+// 匹配优先级：真实历史运费 > 规则估算(perPieceW × 模型) > 无（手动）
+function lookupFreight(productId, size, qty){
+  const rule = size.cm && FREIGHT_RULES[productId] && FREIGHT_RULES[productId][size.cm];
+  if(rule && rule[qty]){
+    const f = rule[qty];
+    return { w: f.w, air: f.air, sea: f.sea, source: 'actual' };
+  }
+  if(size.perPieceW){
+    const w = Math.round(size.perPieceW * qty * 10) / 10;
+    return { w: w, air: deriveAir(w), sea: deriveSea(w), source: 'estimate' };
+  }
+  return null;
+}
+function calc(){
+  if(!curProduct) return;
+  curSize = curSize == null ? 0 : curSize;
+  const size = curProduct.sizes[curSize];
+  let items = 0, unit = 0, note='', rangeTxt='';
+  if(curProduct.mode === 'unit'){
+    curQty = parseInt($('qty').value)||curProduct.moq;
+    items = size.u * curQty;
+    unit = size.u;
+  }else{
+    curQty = parseInt($('qty').value);
+    if(curProduct.mode === 'range'){
+      const r = size.p[curQty];
+      items = (r[0]+r[1])/2;
+      unit = items/curQty;
+      rangeTxt = `（区间 $${r[0]}–$${r[1]}）`;
+    }else{
+      items = size.p[curQty];
+      unit = items/curQty;
+    }
+  }
+  let addon = 0;
+  document.querySelectorAll('#addons input:checked').forEach(c=>{
+    const per = c.dataset.per==='1';
+    if(per){ note += '；含需单独报价的工艺项'; }
+    else { addon += parseFloat(c.dataset.price||0); }
+  });
+  $('rQty').textContent = curQty + ' ' + curProduct.unit;
+  $('rItems').textContent = fmt(items) + (rangeTxt?('  '+rangeTxt):'');
+  $('rUnit').textContent = '$' + unit.toFixed(3) + ' / ' + curProduct.unit;
+  $('rAddon').textContent = fmt(addon);
+  const freight = parseFloat($('freight').value)||0;
+  const total = items + addon + freight;
+  $('rFreight').textContent = fmt(freight);
+  $('rTotal').textContent = fmt(total);
+  $('rNote').textContent = note;
+}
+
+// 根据下拉（manual/air/sea）自动填运费金额
+function applyFreightMode(){
+  if(!curProduct) return;
+  const mode = $('freightMode').value;
+  const mcb = $('manualCalcBox');
+  if(mode === 'manualCalc'){
+    mcb.style.display = '';
+    updateManualCalc();
+    return;
+  }
+  mcb.style.display = 'none';
+  const size = curProduct.sizes[curSize];
+  const fr = lookupFreight(curProduct.id, size, curQty);
+  if(mode === 'air' && fr && fr.air != null) $('freight').value = fr.air;
+  else if(mode === 'sea' && fr && fr.sea != null) $('freight').value = fr.sea;
+}
+
+function calcManualAir(w){ return w <= 0.5 ? 20 : 20 + 6 * Math.ceil((w - 0.5) / 0.5); }
+function calcManualSea(w){ return w <= 12 ? 45 : 45 + 3 * Math.ceil(w - 12); }
+
+function updateManualCalc(){
+  const w = parseFloat($('manualWeight').value)||0;
+  const method = $('manualMethod').value;
+  if(w <= 0){ $('manualCalcResult').textContent = '空运：0.5kg=$20，超出每0.5kg+$6；海运：12kg=$45，超出每1kg+$3'; return; }
+  const air = calcManualAir(w);
+  const sea = calcManualSea(w);
+  const val = method === 'air' ? air : sea;
+  $('manualCalcResult').textContent = w+'kg → 空运 $'+air+' · 海运 $'+sea+'（当前用'+(method==='air'?'空运':'海运')+': $'+val+'）';
+  $('freight').value = val;
+}
+
+// 产品/尺寸/数量变化时：重建下拉 + 匹配提示 + 自动填运费
+function rebuildFreight(){
+  if(!curProduct) return;
+  const size = curProduct.sizes[curSize];
+  curQty = curProduct.mode === 'unit' ? (parseInt($('qty').value)||curProduct.moq) : parseInt($('qty').value);
+  const fr = lookupFreight(curProduct.id, size, curQty);
+  const modeSel = $('freightMode');
+  const prev = modeSel.value;
+  let opts = '<option value="manual">暂不计运费 / 手动输入</option>';
+  opts += '<option value="manualCalc">手动计算（按重量）</option>';
+  if(fr && fr.air != null) opts += '<option value="air">空运</option>';
+  if(fr && fr.sea != null) opts += '<option value="sea">海运</option>';
+  modeSel.innerHTML = opts;
+  if([...modeSel.options].some(o=>o.value===prev)) modeSel.value = prev;
+  const match = $('freightMatch');
+  if(fr){
+    let m = [];
+    if(fr.air != null) m.push('空运 $'+fr.air);
+    if(fr.sea != null) m.push('海运 $'+fr.sea);
+    const mt = m.join('；');
+    if(fr.source==='actual'){
+      match.textContent = '已匹配实际运费：'+fr.w+'kg'+(mt?('；'+mt):'')+'。实际记录优先于按公斤估算。';
+    }else{
+      match.textContent = '规则估算运费：'+fr.w+'kg'+(mt?('；'+mt):'')+'。';
+    }
+  }else{
+    match.textContent = 'No exact freight record — manual quotation required';
+  }
+  applyFreightMode();
+  calc();
+}
+
+// init
+buildProductSelect();
+$('freight').oninput = calc;
+$('freightMode').onchange = function(){ applyFreightMode(); calc(); };
+$('manualWeight').oninput = function(){ updateManualCalc(); calc(); };
+$('manualMethod').onchange = function(){ updateManualCalc(); calc(); };
+
+// ================= 完整报价数据库 =================
+const DB_ROWS = [{"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "16×7×13", "inch": "6.3×2.7×5.1\"", "qty": 50, "ptype": "Batch", "bmin": null, "bmax": null, "umin": null, "umax": null, "src": "Original", "ref": "", "weight": "4kg", "air": 38, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "低于MOQ无标准价，仅运费/重量参考"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "16×7×13", "inch": "6.3×2.7×5.1\"", "qty": 100, "ptype": "Batch", "bmin": 110, "bmax": 110, "umin": 1.1, "umax": 1.1, "src": "Original", "ref": "", "weight": "6kg", "air": 62, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "16×7×13", "inch": "6.3×2.7×5.1\"", "qty": 200, "ptype": "Batch", "bmin": 160, "bmax": 160, "umin": 0.8, "umax": 0.8, "src": "Original", "ref": "", "weight": "12kg", "air": 128, "sea": 42, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "16×7×13", "inch": "6.3×2.7×5.1\"", "qty": 500, "ptype": "Batch", "bmin": 300, "bmax": 300, "umin": 0.6, "umax": 0.6, "src": "Original", "ref": "", "weight": "30kg", "air": 328, "sea": 92, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "16×7×13", "inch": "6.3×2.7×5.1\"", "qty": 1000, "ptype": "Batch", "bmin": 450, "bmax": 450, "umin": 0.45, "umax": 0.45, "src": "Original", "ref": "", "weight": "60kg", "air": null, "sea": 172, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "23×10×18", "inch": "9×4×7\"", "qty": 50, "ptype": "Batch", "bmin": null, "bmax": null, "umin": null, "umax": null, "src": "Original", "ref": "", "weight": "4kg", "air": 46, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "低于MOQ无标准价，仅运费/重量参考"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "23×10×18", "inch": "9×4×7\"", "qty": 100, "ptype": "Batch", "bmin": 130, "bmax": 130, "umin": 1.3, "umax": 1.3, "src": "Original", "ref": "", "weight": "8kg", "air": 86, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "23×10×18", "inch": "9×4×7\"", "qty": 200, "ptype": "Batch", "bmin": 230, "bmax": 230, "umin": 1.15, "umax": 1.15, "src": "Original", "ref": "", "weight": "16kg", "air": 176, "sea": 52, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "23×10×18", "inch": "9×4×7\"", "qty": 500, "ptype": "Batch", "bmin": 330, "bmax": 330, "umin": 0.66, "umax": 0.66, "src": "Original", "ref": "", "weight": "40kg", "air": null, "sea": 120, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "23×10×18", "inch": "9×4×7\"", "qty": 1000, "ptype": "Batch", "bmin": 480, "bmax": 480, "umin": 0.48, "umax": 0.48, "src": "Original", "ref": "", "weight": "80kg", "air": null, "sea": 206, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "27×8×21", "inch": "10.6×3.1×8.3\"", "qty": 50, "ptype": "Batch", "bmin": null, "bmax": null, "umin": null, "umax": null, "src": "Original", "ref": "", "weight": "5kg", "air": 56, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "低于MOQ无标准价，仅运费/重量参考"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "27×8×21", "inch": "10.6×3.1×8.3\"", "qty": 100, "ptype": "Batch", "bmin": 140, "bmax": 140, "umin": 1.4, "umax": 1.4, "src": "Original", "ref": "", "weight": "10kg", "air": 108, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "27×8×21", "inch": "10.6×3.1×8.3\"", "qty": 200, "ptype": "Batch", "bmin": 250, "bmax": 250, "umin": 1.25, "umax": 1.25, "src": "Original", "ref": "", "weight": "20kg", "air": 216, "sea": 66, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "27×8×21", "inch": "10.6×3.1×8.3\"", "qty": 500, "ptype": "Batch", "bmin": 350, "bmax": 350, "umin": 0.7, "umax": 0.7, "src": "Original", "ref": "", "weight": "50kg", "air": null, "sea": 139, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "27×8×21", "inch": "10.6×3.1×8.3\"", "qty": 1000, "ptype": "Batch", "bmin": 500, "bmax": 500, "umin": 0.5, "umax": 0.5, "src": "Original", "ref": "", "weight": "100kg", "air": null, "sea": 242, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "32×11.5×26", "inch": "12.6×4.5×10.2\"", "qty": 50, "ptype": "Batch", "bmin": null, "bmax": null, "umin": null, "umax": null, "src": "Original", "ref": "", "weight": "6.5kg", "air": 69, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "低于MOQ无标准价，仅运费/重量参考"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "32×11.5×26", "inch": "12.6×4.5×10.2\"", "qty": 100, "ptype": "Batch", "bmin": 190, "bmax": 190, "umin": 1.9, "umax": 1.9, "src": "Original", "ref": "", "weight": "13kg", "air": 142, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "32×11.5×26", "inch": "12.6×4.5×10.2\"", "qty": 200, "ptype": "Batch", "bmin": 290, "bmax": 290, "umin": 1.45, "umax": 1.45, "src": "Original", "ref": "", "weight": "26kg", "air": null, "sea": 82, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "32×11.5×26", "inch": "12.6×4.5×10.2\"", "qty": 500, "ptype": "Batch", "bmin": 410, "bmax": 410, "umin": 0.82, "umax": 0.82, "src": "Original", "ref": "", "weight": "65kg", "air": null, "sea": 179, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "32×11.5×26", "inch": "12.6×4.5×10.2\"", "qty": 1000, "ptype": "Batch", "bmin": 550, "bmax": 550, "umin": 0.55, "umax": 0.55, "src": "Original", "ref": "", "weight": "130kg", "air": null, "sea": 298, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "42×14×32", "inch": "16.5×5.5×12.6\"", "qty": 50, "ptype": "Batch", "bmin": null, "bmax": null, "umin": null, "umax": null, "src": "Original", "ref": "", "weight": "9.5kg", "air": 99, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "低于MOQ无标准价，仅运费/重量参考"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "42×14×32", "inch": "16.5×5.5×12.6\"", "qty": 100, "ptype": "Batch", "bmin": 270, "bmax": 270, "umin": 2.7, "umax": 2.7, "src": "Original", "ref": "", "weight": "19kg", "air": null, "sea": 58, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "42×14×32", "inch": "16.5×5.5×12.6\"", "qty": 200, "ptype": "Batch", "bmin": 420, "bmax": 420, "umin": 2.1, "umax": 2.1, "src": "Original", "ref": "", "weight": "38kg", "air": null, "sea": 118, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "42×14×32", "inch": "16.5×5.5×12.6\"", "qty": 500, "ptype": "Batch", "bmin": 610, "bmax": 610, "umin": 1.22, "umax": 1.22, "src": "Original", "ref": "", "weight": "95kg", "air": null, "sea": 232, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "横版", "cm": "42×14×32", "inch": "16.5×5.5×12.6\"", "qty": 1000, "ptype": "Batch", "bmin": 910, "bmax": 910, "umin": 0.91, "umax": 0.91, "src": "Original", "ref": "", "weight": "190kg", "air": null, "sea": 397, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价+空/海运"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "14×7×15", "inch": "5.5×2.7×5.9\"", "qty": 100, "ptype": "Batch", "bmin": 110, "bmax": 110, "umin": 1.1, "umax": 1.1, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "14×7×15", "inch": "5.5×2.7×5.9\"", "qty": 200, "ptype": "Batch", "bmin": 160, "bmax": 160, "umin": 0.8, "umax": 0.8, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "14×7×15", "inch": "5.5×2.7×5.9\"", "qty": 500, "ptype": "Batch", "bmin": 300, "bmax": 300, "umin": 0.6, "umax": 0.6, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "14×7×15", "inch": "5.5×2.7×5.9\"", "qty": 1000, "ptype": "Batch", "bmin": 450, "bmax": 450, "umin": 0.45, "umax": 0.45, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "15×6×20", "inch": "5.9×2.4×7.9\"", "qty": 100, "ptype": "Batch", "bmin": 120, "bmax": 120, "umin": 1.2, "umax": 1.2, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "15×6×20", "inch": "5.9×2.4×7.9\"", "qty": 200, "ptype": "Batch", "bmin": 180, "bmax": 180, "umin": 0.9, "umax": 0.9, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "15×6×20", "inch": "5.9×2.4×7.9\"", "qty": 500, "ptype": "Batch", "bmin": 330, "bmax": 330, "umin": 0.66, "umax": 0.66, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "15×6×20", "inch": "5.9×2.4×7.9\"", "qty": 1000, "ptype": "Batch", "bmin": 480, "bmax": 480, "umin": 0.48, "umax": 0.48, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "20×9.5×28", "inch": "7.9×4×11\"", "qty": 100, "ptype": "Batch", "bmin": 150, "bmax": 150, "umin": 1.5, "umax": 1.5, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "20×9.5×28", "inch": "7.9×4×11\"", "qty": 200, "ptype": "Batch", "bmin": 260, "bmax": 260, "umin": 1.3, "umax": 1.3, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "20×9.5×28", "inch": "7.9×4×11\"", "qty": 500, "ptype": "Batch", "bmin": 350, "bmax": 350, "umin": 0.7, "umax": 0.7, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "20×9.5×28", "inch": "7.9×4×11\"", "qty": 1000, "ptype": "Batch", "bmin": 500, "bmax": 500, "umin": 0.5, "umax": 0.5, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "28×10×33", "inch": "11×4×13\"", "qty": 100, "ptype": "Batch", "bmin": 180, "bmax": 180, "umin": 1.8, "umax": 1.8, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "28×10×33", "inch": "11×4×13\"", "qty": 200, "ptype": "Batch", "bmin": 300, "bmax": 300, "umin": 1.5, "umax": 1.5, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "28×10×33", "inch": "11×4×13\"", "qty": 500, "ptype": "Batch", "bmin": 450, "bmax": 450, "umin": 0.9, "umax": 0.9, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "28×10×33", "inch": "11×4×13\"", "qty": 1000, "ptype": "Batch", "bmin": 560, "bmax": 560, "umin": 0.56, "umax": 0.56, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "28×15×35", "inch": "11×6×13.8\"", "qty": 100, "ptype": "Batch", "bmin": 220, "bmax": 220, "umin": 2.2, "umax": 2.2, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "28×15×35", "inch": "11×6×13.8\"", "qty": 200, "ptype": "Batch", "bmin": 320, "bmax": 320, "umin": 1.6, "umax": 1.6, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "28×15×35", "inch": "11×6×13.8\"", "qty": 500, "ptype": "Batch", "bmin": 460, "bmax": 460, "umin": 0.92, "umax": 0.92, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "28×15×35", "inch": "11×6×13.8\"", "qty": 1000, "ptype": "Batch", "bmin": 620, "bmax": 620, "umin": 0.62, "umax": 0.62, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "30×12×39.5", "inch": "11.8×4.7×15.7\"", "qty": 100, "ptype": "Batch", "bmin": 240, "bmax": 240, "umin": 2.4, "umax": 2.4, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "30×12×39.5", "inch": "11.8×4.7×15.7\"", "qty": 200, "ptype": "Batch", "bmin": 340, "bmax": 340, "umin": 1.7, "umax": 1.7, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "30×12×39.5", "inch": "11.8×4.7×15.7\"", "qty": 500, "ptype": "Batch", "bmin": 480, "bmax": 480, "umin": 0.96, "umax": 0.96, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "纸袋 Paper Bag", "Type": "竖版", "cm": "30×12×39.5", "inch": "11.8×4.7×15.7\"", "qty": 1000, "ptype": "Batch", "bmin": 650, "bmax": 650, "umin": 0.65, "umax": 0.65, "src": "Original", "ref": "", "weight": "", "air": null, "sea": null, "app": "", "moq": 100, "dim": "W×D×H", "notes": "整批价（暂无空海运数据）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "13×13×3", "inch": "", "qty": 50, "ptype": "Batch", "bmin": 120, "bmax": 120, "umin": 2.4, "umax": 2.4, "src": "Original", "ref": "", "weight": "6kg", "air": 64, "sea": 45, "app": "小件/配件", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "13×13×3", "inch": "", "qty": 100, "ptype": "Batch", "bmin": 180, "bmax": 180, "umin": 1.8, "umax": 1.8, "src": "Original", "ref": "", "weight": "12kg", "air": 128, "sea": 57, "app": "小件/配件", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "13×13×3", "inch": "", "qty": 200, "ptype": "Batch", "bmin": 290, "bmax": 290, "umin": 1.45, "umax": 1.45, "src": "Original", "ref": "", "weight": "24kg", "air": 256, "sea": 81, "app": "小件/配件", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "13×13×3", "inch": "", "qty": 500, "ptype": "Batch", "bmin": 400, "bmax": 400, "umin": 0.8, "umax": 0.8, "src": "Original", "ref": "", "weight": "60kg", "air": 639, "sea": 155, "app": "小件/配件", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "15×10×4", "inch": "", "qty": 50, "ptype": "Batch", "bmin": 120, "bmax": 120, "umin": 2.4, "umax": 2.4, "src": "Original", "ref": "", "weight": "6kg", "air": 64, "sea": 45, "app": "小件/配件", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "15×10×4", "inch": "", "qty": 100, "ptype": "Batch", "bmin": 180, "bmax": 180, "umin": 1.8, "umax": 1.8, "src": "Original", "ref": "", "weight": "12kg", "air": 128, "sea": 57, "app": "小件/配件", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "15×10×4", "inch": "", "qty": 200, "ptype": "Batch", "bmin": 290, "bmax": 290, "umin": 1.45, "umax": 1.45, "src": "Original", "ref": "", "weight": "24kg", "air": 256, "sea": 81, "app": "小件/配件", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "15×10×4", "inch": "", "qty": 500, "ptype": "Batch", "bmin": 400, "bmax": 400, "umin": 0.8, "umax": 0.8, "src": "Original", "ref": "", "weight": "60kg", "air": 639, "sea": 155, "app": "小件/配件", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "15×15×5", "inch": "", "qty": 50, "ptype": "Batch", "bmin": 120, "bmax": 120, "umin": 2.4, "umax": 2.4, "src": "Original", "ref": "", "weight": "7kg", "air": 75, "sea": 47, "app": "化妆品", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "15×15×5", "inch": "", "qty": 100, "ptype": "Batch", "bmin": 180, "bmax": 180, "umin": 1.8, "umax": 1.8, "src": "Original", "ref": "", "weight": "14kg", "air": 149, "sea": 61, "app": "化妆品", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "15×15×5", "inch": "", "qty": 200, "ptype": "Batch", "bmin": 290, "bmax": 290, "umin": 1.45, "umax": 1.45, "src": "Original", "ref": "", "weight": "28kg", "air": 298, "sea": 89, "app": "化妆品", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "15×15×5", "inch": "", "qty": 500, "ptype": "Batch", "bmin": 400, "bmax": 400, "umin": 0.8, "umax": 0.8, "src": "Original", "ref": "", "weight": "70kg", "air": 746, "sea": 175, "app": "化妆品", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "20×14×4", "inch": "", "qty": 50, "ptype": "Batch", "bmin": 120, "bmax": 120, "umin": 2.4, "umax": 2.4, "src": "Original", "ref": "", "weight": "9kg", "air": 96, "sea": 51, "app": "化妆品", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "20×14×4", "inch": "", "qty": 100, "ptype": "Batch", "bmin": 180, "bmax": 180, "umin": 1.8, "umax": 1.8, "src": "Original", "ref": "", "weight": "18kg", "air": 192, "sea": 69, "app": "化妆品", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "20×14×4", "inch": "", "qty": 200, "ptype": "Batch", "bmin": 290, "bmax": 290, "umin": 1.45, "umax": 1.45, "src": "Original", "ref": "", "weight": "36kg", "air": 383, "sea": 106, "app": "化妆品", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "20×14×4", "inch": "", "qty": 500, "ptype": "Batch", "bmin": 400, "bmax": 400, "umin": 0.8, "umax": 0.8, "src": "Original", "ref": "", "weight": "90kg", "air": 958, "sea": 216, "app": "化妆品", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "25×20×7", "inch": "", "qty": 50, "ptype": "Batch", "bmin": 180, "bmax": 180, "umin": 3.6, "umax": 3.6, "src": "Original", "ref": "", "weight": "13kg", "air": 138, "sea": 59, "app": "服装/假发", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "25×20×7", "inch": "", "qty": 100, "ptype": "Batch", "bmin": 270, "bmax": 270, "umin": 2.7, "umax": 2.7, "src": "Original", "ref": "", "weight": "26kg", "air": 277, "sea": 85, "app": "服装/假发", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "25×20×7", "inch": "", "qty": 200, "ptype": "Batch", "bmin": 370, "bmax": 370, "umin": 1.85, "umax": 1.85, "src": "Original", "ref": "", "weight": "52kg", "air": 554, "sea": 138, "app": "服装/假发", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "25×20×7", "inch": "", "qty": 500, "ptype": "Batch", "bmin": 590, "bmax": 590, "umin": 1.18, "umax": 1.18, "src": "Original", "ref": "", "weight": "130kg", "air": 1384, "sea": 297, "app": "服装/假发", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "27×16.5×5", "inch": "", "qty": 50, "ptype": "Batch", "bmin": 180, "bmax": 180, "umin": 3.6, "umax": 3.6, "src": "Original", "ref": "", "weight": "12kg", "air": 128, "sea": 57, "app": "假发", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "27×16.5×5", "inch": "", "qty": 100, "ptype": "Batch", "bmin": 270, "bmax": 270, "umin": 2.7, "umax": 2.7, "src": "Original", "ref": "", "weight": "24kg", "air": 256, "sea": 81, "app": "假发", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "27×16.5×5", "inch": "", "qty": 200, "ptype": "Batch", "bmin": 370, "bmax": 370, "umin": 1.85, "umax": 1.85, "src": "Original", "ref": "", "weight": "48kg", "air": 511, "sea": 130, "app": "假发", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "27×16.5×5", "inch": "", "qty": 500, "ptype": "Batch", "bmin": 590, "bmax": 590, "umin": 1.18, "umax": 1.18, "src": "Original", "ref": "", "weight": "120kg", "air": 1278, "sea": 277, "app": "假发", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "33×23×5", "inch": "", "qty": 50, "ptype": "Batch", "bmin": 180, "bmax": 180, "umin": 3.6, "umax": 3.6, "src": "Original", "ref": "", "weight": "15kg", "air": 160, "sea": 63, "app": "服装", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "33×23×5", "inch": "", "qty": 100, "ptype": "Batch", "bmin": 270, "bmax": 270, "umin": 2.7, "umax": 2.7, "src": "Original", "ref": "", "weight": "30kg", "air": 320, "sea": 93, "app": "服装", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "33×23×5", "inch": "", "qty": 200, "ptype": "Batch", "bmin": 370, "bmax": 370, "umin": 1.85, "umax": 1.85, "src": "Original", "ref": "", "weight": "60kg", "air": 639, "sea": 155, "app": "服装", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "33×23×5", "inch": "", "qty": 500, "ptype": "Batch", "bmin": 590, "bmax": 590, "umin": 1.18, "umax": 1.18, "src": "Original", "ref": "", "weight": "150kg", "air": 1598, "sea": 338, "app": "服装", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "36×25×12", "inch": "", "qty": 50, "ptype": "Batch", "bmin": 250, "bmax": 250, "umin": 5.0, "umax": 5.0, "src": "Original", "ref": "", "weight": "28kg", "air": 298, "sea": 89, "app": "鞋", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "36×25×12", "inch": "", "qty": 100, "ptype": "Batch", "bmin": 580, "bmax": 580, "umin": 5.8, "umax": 5.8, "src": "Original", "ref": "", "weight": "56kg", "air": 596, "sea": 147, "app": "鞋", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "36×25×12", "inch": "", "qty": 200, "ptype": "Batch", "bmin": 770, "bmax": 770, "umin": 3.85, "umax": 3.85, "src": "Original", "ref": "", "weight": "112kg", "air": 1193, "sea": 261, "app": "鞋", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "36×25×12", "inch": "", "qty": 500, "ptype": "Batch", "bmin": 1120, "bmax": 1120, "umin": 2.24, "umax": 2.24, "src": "Original", "ref": "", "weight": "280kg", "air": 2982, "sea": 603, "app": "鞋", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "40×28.5×6", "inch": "", "qty": 50, "ptype": "Batch", "bmin": 270, "bmax": 270, "umin": 5.4, "umax": 5.4, "src": "Original", "ref": "", "weight": "28kg", "air": 298, "sea": 89, "app": "鞋", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "40×28.5×6", "inch": "", "qty": 100, "ptype": "Batch", "bmin": 450, "bmax": 450, "umin": 4.5, "umax": 4.5, "src": "Original", "ref": "", "weight": "56kg", "air": 596, "sea": 147, "app": "鞋", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "40×28.5×6", "inch": "", "qty": 200, "ptype": "Batch", "bmin": 650, "bmax": 650, "umin": 3.25, "umax": 3.25, "src": "Original", "ref": "", "weight": "112kg", "air": 1193, "sea": 261, "app": "鞋", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "邮寄盒 Mailer Box", "Type": "", "cm": "40×28.5×6", "inch": "", "qty": 500, "ptype": "Batch", "bmin": 850, "bmax": 850, "umin": 1.7, "umax": 1.7, "src": "Original", "ref": "", "weight": "280kg", "air": 2982, "sea": 603, "app": "鞋", "moq": 50, "dim": "W×D×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "15×10×5", "inch": "", "qty": "per pc", "ptype": "Unit", "bmin": null, "bmax": null, "umin": 3.0, "umax": 3.0, "src": "Original", "ref": "", "weight": "9kg/50pcs", "air": null, "sea": null, "app": "", "moq": 20, "dim": "L×W×H", "notes": "单价×数量；40×30×15 无价不录"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "16×10×10", "inch": "", "qty": "per pc", "ptype": "Unit", "bmin": null, "bmax": null, "umin": 3.5, "umax": 3.5, "src": "Original", "ref": "", "weight": "16kg/50pcs", "air": null, "sea": null, "app": "", "moq": 20, "dim": "L×W×H", "notes": "单价×数量；40×30×15 无价不录"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "20×18×7.5", "inch": "", "qty": "per pc", "ptype": "Unit", "bmin": null, "bmax": null, "umin": 4.0, "umax": 4.0, "src": "Original", "ref": "", "weight": "19kg/50pcs", "air": null, "sea": null, "app": "", "moq": 20, "dim": "L×W×H", "notes": "单价×数量；40×30×15 无价不录"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "25×20×10", "inch": "", "qty": "per pc", "ptype": "Unit", "bmin": null, "bmax": null, "umin": 4.5, "umax": 4.5, "src": "Original", "ref": "", "weight": "23kg/50pcs", "air": null, "sea": null, "app": "", "moq": 20, "dim": "L×W×H", "notes": "单价×数量；40×30×15 无价不录"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "27×22×8", "inch": "", "qty": "per pc", "ptype": "Unit", "bmin": null, "bmax": null, "umin": 4.6, "umax": 4.6, "src": "Original", "ref": "", "weight": "21kg/50pcs", "air": null, "sea": null, "app": "", "moq": 20, "dim": "L×W×H", "notes": "单价×数量；40×30×15 无价不录"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "29×21×7.5", "inch": "", "qty": "per pc", "ptype": "Unit", "bmin": null, "bmax": null, "umin": 4.8, "umax": 4.8, "src": "Original", "ref": "", "weight": "22kg/50pcs", "air": null, "sea": null, "app": "", "moq": 20, "dim": "L×W×H", "notes": "单价×数量；40×30×15 无价不录"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "28×20×15", "inch": "", "qty": "per pc", "ptype": "Unit", "bmin": null, "bmax": null, "umin": 5.2, "umax": 5.2, "src": "Original", "ref": "", "weight": "27kg/50pcs", "air": null, "sea": null, "app": "", "moq": 20, "dim": "L×W×H", "notes": "单价×数量；40×30×15 无价不录"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "30×30×10", "inch": "", "qty": "per pc", "ptype": "Unit", "bmin": null, "bmax": null, "umin": 5.6, "umax": 5.6, "src": "Original", "ref": "", "weight": "31kg/50pcs", "air": null, "sea": null, "app": "", "moq": 20, "dim": "L×W×H", "notes": "单价×数量；40×30×15 无价不录"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "38×30.5×11.5", "inch": "", "qty": "per pc", "ptype": "Unit", "bmin": null, "bmax": null, "umin": 7.2, "umax": 7.2, "src": "Original", "ref": "", "weight": "31kg/50pcs", "air": null, "sea": null, "app": "", "moq": 20, "dim": "L×W×H", "notes": "单价×数量；40×30×15 无价不录"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "29×21×7.5", "inch": "", "qty": 30, "ptype": "Unit", "bmin": 144.0, "bmax": 144.0, "umin": 4.8, "umax": 4.8, "src": "Original", "ref": "", "weight": "15kg", "air": 152, "sea": 52, "app": "", "moq": 20, "dim": "L×W×H", "notes": "实际运费记录"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "29×21×7.5", "inch": "", "qty": 50, "ptype": "Unit", "bmin": 240.0, "bmax": 240.0, "umin": 4.8, "umax": 4.8, "src": "Original", "ref": "", "weight": "22kg", "air": 232, "sea": 76, "app": "", "moq": 20, "dim": "L×W×H", "notes": "实际运费记录"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "29×21×7.5", "inch": "", "qty": 100, "ptype": "Unit", "bmin": 480.0, "bmax": 480.0, "umin": 4.8, "umax": 4.8, "src": "Original", "ref": "", "weight": "44kg", "air": 462, "sea": 136, "app": "", "moq": 20, "dim": "L×W×H", "notes": "实际运费记录"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "15×10×5", "inch": "", "qty": 30, "ptype": "Unit", "bmin": 90.0, "bmax": 90.0, "umin": 3.0, "umax": 3.0, "src": "Original", "ref": "", "weight": "5.4kg", "air": 58, "sea": 43, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "15×10×5", "inch": "", "qty": 50, "ptype": "Unit", "bmin": 150.0, "bmax": 150.0, "umin": 3.0, "umax": 3.0, "src": "Original", "ref": "", "weight": "9kg", "air": 96, "sea": 51, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "15×10×5", "inch": "", "qty": 100, "ptype": "Unit", "bmin": 300.0, "bmax": 300.0, "umin": 3.0, "umax": 3.0, "src": "Original", "ref": "", "weight": "18kg", "air": 192, "sea": 69, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "16×10×10", "inch": "", "qty": 30, "ptype": "Unit", "bmin": 105.0, "bmax": 105.0, "umin": 3.5, "umax": 3.5, "src": "Original", "ref": "", "weight": "9.6kg", "air": 102, "sea": 52, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "16×10×10", "inch": "", "qty": 50, "ptype": "Unit", "bmin": 175.0, "bmax": 175.0, "umin": 3.5, "umax": 3.5, "src": "Original", "ref": "", "weight": "16kg", "air": 170, "sea": 65, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "16×10×10", "inch": "", "qty": 100, "ptype": "Unit", "bmin": 350.0, "bmax": 350.0, "umin": 3.5, "umax": 3.5, "src": "Original", "ref": "", "weight": "32kg", "air": 341, "sea": 98, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "20×18×7.5", "inch": "", "qty": 30, "ptype": "Unit", "bmin": 120.0, "bmax": 120.0, "umin": 4.0, "umax": 4.0, "src": "Original", "ref": "", "weight": "11.4kg", "air": 121, "sea": 56, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "20×18×7.5", "inch": "", "qty": 50, "ptype": "Unit", "bmin": 200.0, "bmax": 200.0, "umin": 4.0, "umax": 4.0, "src": "Original", "ref": "", "weight": "19kg", "air": 202, "sea": 71, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "20×18×7.5", "inch": "", "qty": 100, "ptype": "Unit", "bmin": 400.0, "bmax": 400.0, "umin": 4.0, "umax": 4.0, "src": "Original", "ref": "", "weight": "38kg", "air": 405, "sea": 110, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "25×20×10", "inch": "", "qty": 30, "ptype": "Unit", "bmin": 135.0, "bmax": 135.0, "umin": 4.5, "umax": 4.5, "src": "Original", "ref": "", "weight": "13.8kg", "air": 147, "sea": 60, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "25×20×10", "inch": "", "qty": 50, "ptype": "Unit", "bmin": 225.0, "bmax": 225.0, "umin": 4.5, "umax": 4.5, "src": "Original", "ref": "", "weight": "23kg", "air": 245, "sea": 79, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "25×20×10", "inch": "", "qty": 100, "ptype": "Unit", "bmin": 450.0, "bmax": 450.0, "umin": 4.5, "umax": 4.5, "src": "Original", "ref": "", "weight": "46kg", "air": 490, "sea": 126, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "27×22×8", "inch": "", "qty": 30, "ptype": "Unit", "bmin": 138.0, "bmax": 138.0, "umin": 4.6, "umax": 4.6, "src": "Original", "ref": "", "weight": "12.6kg", "air": 134, "sea": 58, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "27×22×8", "inch": "", "qty": 50, "ptype": "Unit", "bmin": 230.0, "bmax": 230.0, "umin": 4.6, "umax": 4.6, "src": "Original", "ref": "", "weight": "21kg", "air": 224, "sea": 75, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "27×22×8", "inch": "", "qty": 100, "ptype": "Unit", "bmin": 460.0, "bmax": 460.0, "umin": 4.6, "umax": 4.6, "src": "Original", "ref": "", "weight": "42kg", "air": 447, "sea": 118, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "28×20×15", "inch": "", "qty": 30, "ptype": "Unit", "bmin": 156.0, "bmax": 156.0, "umin": 5.2, "umax": 5.2, "src": "Original", "ref": "", "weight": "16.2kg", "air": 173, "sea": 65, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "28×20×15", "inch": "", "qty": 50, "ptype": "Unit", "bmin": 260.0, "bmax": 260.0, "umin": 5.2, "umax": 5.2, "src": "Original", "ref": "", "weight": "27kg", "air": 288, "sea": 87, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "28×20×15", "inch": "", "qty": 100, "ptype": "Unit", "bmin": 520.0, "bmax": 520.0, "umin": 5.2, "umax": 5.2, "src": "Original", "ref": "", "weight": "54kg", "air": 575, "sea": 142, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "30×30×10", "inch": "", "qty": 30, "ptype": "Unit", "bmin": 168.0, "bmax": 168.0, "umin": 5.6, "umax": 5.6, "src": "Original", "ref": "", "weight": "18.6kg", "air": 198, "sea": 70, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "30×30×10", "inch": "", "qty": 50, "ptype": "Unit", "bmin": 280.0, "bmax": 280.0, "umin": 5.6, "umax": 5.6, "src": "Original", "ref": "", "weight": "31kg", "air": 330, "sea": 96, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "30×30×10", "inch": "", "qty": 100, "ptype": "Unit", "bmin": 560.0, "bmax": 560.0, "umin": 5.6, "umax": 5.6, "src": "Original", "ref": "", "weight": "62kg", "air": 660, "sea": 159, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "38×30.5×11.5", "inch": "", "qty": 30, "ptype": "Unit", "bmin": 216.0, "bmax": 216.0, "umin": 7.2, "umax": 7.2, "src": "Original", "ref": "", "weight": "18.6kg", "air": 198, "sea": 70, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "38×30.5×11.5", "inch": "", "qty": 50, "ptype": "Unit", "bmin": 360.0, "bmax": 360.0, "umin": 7.2, "umax": 7.2, "src": "Original", "ref": "", "weight": "31kg", "air": 330, "sea": 96, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "磁吸礼盒 Magnetic Gift Box", "Type": "", "cm": "38×30.5×11.5", "inch": "", "qty": 100, "ptype": "Unit", "bmin": 720.0, "bmax": 720.0, "umin": 7.2, "umax": 7.2, "src": "Original", "ref": "", "weight": "62kg", "air": 660, "sea": 159, "app": "", "moq": 20, "dim": "L×W×H", "notes": "推算运费（按重量）"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "11×15", "inch": "", "qty": 100, "ptype": "Range", "bmin": 70, "bmax": 80, "umin": 0.7, "umax": 0.8, "src": "Original", "ref": "", "weight": "1kg", "air": 11, "sea": 34, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "11×15", "inch": "", "qty": 250, "ptype": "Range", "bmin": 120, "bmax": 160, "umin": 0.48, "umax": 0.64, "src": "Original", "ref": "", "weight": "2.5kg", "air": 27, "sea": 37, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "11×15", "inch": "", "qty": 500, "ptype": "Range", "bmin": 180, "bmax": 220, "umin": 0.36, "umax": 0.44, "src": "Original", "ref": "", "weight": "5kg", "air": 53, "sea": 42, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "11×15", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 280, "bmax": 320, "umin": 0.28, "umax": 0.32, "src": "Original", "ref": "", "weight": "10kg", "air": 106, "sea": 53, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "13×15", "inch": "", "qty": 100, "ptype": "Range", "bmin": 70, "bmax": 80, "umin": 0.7, "umax": 0.8, "src": "Original", "ref": "", "weight": "1.2kg", "air": 13, "sea": 35, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "13×15", "inch": "", "qty": 250, "ptype": "Range", "bmin": 120, "bmax": 160, "umin": 0.48, "umax": 0.64, "src": "Original", "ref": "", "weight": "3kg", "air": 32, "sea": 38, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "13×15", "inch": "", "qty": 500, "ptype": "Range", "bmin": 180, "bmax": 220, "umin": 0.36, "umax": 0.44, "src": "Original", "ref": "", "weight": "6kg", "air": 64, "sea": 45, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "13×15", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 280, "bmax": 320, "umin": 0.28, "umax": 0.32, "src": "Original", "ref": "", "weight": "12kg", "air": 128, "sea": 57, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "13×18", "inch": "", "qty": 100, "ptype": "Range", "bmin": 70, "bmax": 80, "umin": 0.7, "umax": 0.8, "src": "Original", "ref": "", "weight": "1.4kg", "air": 15, "sea": 35, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "13×18", "inch": "", "qty": 250, "ptype": "Range", "bmin": 120, "bmax": 160, "umin": 0.48, "umax": 0.64, "src": "Original", "ref": "", "weight": "3.5kg", "air": 37, "sea": 39, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "13×18", "inch": "", "qty": 500, "ptype": "Range", "bmin": 180, "bmax": 220, "umin": 0.36, "umax": 0.44, "src": "Original", "ref": "", "weight": "7kg", "air": 75, "sea": 47, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "13×18", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 280, "bmax": 320, "umin": 0.28, "umax": 0.32, "src": "Original", "ref": "", "weight": "14kg", "air": 149, "sea": 61, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "15×18", "inch": "", "qty": 100, "ptype": "Range", "bmin": 70, "bmax": 80, "umin": 0.7, "umax": 0.8, "src": "Original", "ref": "", "weight": "1.6kg", "air": 17, "sea": 36, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "15×18", "inch": "", "qty": 250, "ptype": "Range", "bmin": 120, "bmax": 160, "umin": 0.48, "umax": 0.64, "src": "Original", "ref": "", "weight": "4kg", "air": 43, "sea": 40, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "15×18", "inch": "", "qty": 500, "ptype": "Range", "bmin": 180, "bmax": 220, "umin": 0.36, "umax": 0.44, "src": "Original", "ref": "", "weight": "8kg", "air": 85, "sea": 49, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "15×18", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 280, "bmax": 320, "umin": 0.28, "umax": 0.32, "src": "Original", "ref": "", "weight": "16kg", "air": 170, "sea": 65, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "15×20", "inch": "", "qty": 100, "ptype": "Range", "bmin": 70, "bmax": 80, "umin": 0.7, "umax": 0.8, "src": "Original", "ref": "", "weight": "1.8kg", "air": 19, "sea": 36, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "15×20", "inch": "", "qty": 250, "ptype": "Range", "bmin": 120, "bmax": 160, "umin": 0.48, "umax": 0.64, "src": "Original", "ref": "", "weight": "4.5kg", "air": 48, "sea": 41, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "15×20", "inch": "", "qty": 500, "ptype": "Range", "bmin": 180, "bmax": 220, "umin": 0.36, "umax": 0.44, "src": "Original", "ref": "", "weight": "9kg", "air": 96, "sea": 51, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "15×20", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 280, "bmax": 320, "umin": 0.28, "umax": 0.32, "src": "Original", "ref": "", "weight": "18kg", "air": 192, "sea": 69, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "18×20", "inch": "", "qty": 100, "ptype": "Range", "bmin": 80, "bmax": 100, "umin": 0.8, "umax": 1.0, "src": "Original", "ref": "", "weight": "2kg", "air": 21, "sea": 36, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "18×20", "inch": "", "qty": 250, "ptype": "Range", "bmin": 160, "bmax": 200, "umin": 0.64, "umax": 0.8, "src": "Original", "ref": "", "weight": "5kg", "air": 53, "sea": 42, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "18×20", "inch": "", "qty": 500, "ptype": "Range", "bmin": 220, "bmax": 240, "umin": 0.44, "umax": 0.48, "src": "Original", "ref": "", "weight": "10kg", "air": 106, "sea": 53, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "18×20", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 320, "bmax": 340, "umin": 0.32, "umax": 0.34, "src": "Original", "ref": "", "weight": "20kg", "air": 213, "sea": 73, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "18×23", "inch": "", "qty": 100, "ptype": "Range", "bmin": 80, "bmax": 100, "umin": 0.8, "umax": 1.0, "src": "Original", "ref": "", "weight": "2.2kg", "air": 23, "sea": 37, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "18×23", "inch": "", "qty": 250, "ptype": "Range", "bmin": 160, "bmax": 200, "umin": 0.64, "umax": 0.8, "src": "Original", "ref": "", "weight": "5.5kg", "air": 59, "sea": 43, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "18×23", "inch": "", "qty": 500, "ptype": "Range", "bmin": 220, "bmax": 240, "umin": 0.44, "umax": 0.48, "src": "Original", "ref": "", "weight": "11kg", "air": 117, "sea": 55, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "18×23", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 320, "bmax": 340, "umin": 0.32, "umax": 0.34, "src": "Original", "ref": "", "weight": "22kg", "air": 234, "sea": 77, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "20×23", "inch": "", "qty": 100, "ptype": "Range", "bmin": 80, "bmax": 100, "umin": 0.8, "umax": 1.0, "src": "Original", "ref": "", "weight": "2.4kg", "air": 26, "sea": 37, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "20×23", "inch": "", "qty": 250, "ptype": "Range", "bmin": 160, "bmax": 200, "umin": 0.64, "umax": 0.8, "src": "Original", "ref": "", "weight": "6kg", "air": 64, "sea": 45, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "20×23", "inch": "", "qty": 500, "ptype": "Range", "bmin": 220, "bmax": 240, "umin": 0.44, "umax": 0.48, "src": "Original", "ref": "", "weight": "12kg", "air": 128, "sea": 57, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "20×23", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 320, "bmax": 340, "umin": 0.32, "umax": 0.34, "src": "Original", "ref": "", "weight": "24kg", "air": 256, "sea": 81, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "23×28", "inch": "", "qty": 100, "ptype": "Range", "bmin": 80, "bmax": 100, "umin": 0.8, "umax": 1.0, "src": "Original", "ref": "", "weight": "3kg", "air": 32, "sea": 38, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "23×28", "inch": "", "qty": 250, "ptype": "Range", "bmin": 160, "bmax": 200, "umin": 0.64, "umax": 0.8, "src": "Original", "ref": "", "weight": "7.5kg", "air": 80, "sea": 48, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "23×28", "inch": "", "qty": 500, "ptype": "Range", "bmin": 220, "bmax": 240, "umin": 0.44, "umax": 0.48, "src": "Original", "ref": "", "weight": "15kg", "air": 160, "sea": 63, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "23×28", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 320, "bmax": 340, "umin": 0.32, "umax": 0.34, "src": "Original", "ref": "", "weight": "30kg", "air": 320, "sea": 93, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "23×30", "inch": "", "qty": 100, "ptype": "Range", "bmin": 80, "bmax": 100, "umin": 0.8, "umax": 1.0, "src": "Original", "ref": "", "weight": "3.2kg", "air": 34, "sea": 39, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "23×30", "inch": "", "qty": 250, "ptype": "Range", "bmin": 160, "bmax": 200, "umin": 0.64, "umax": 0.8, "src": "Original", "ref": "", "weight": "8kg", "air": 85, "sea": 49, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "23×30", "inch": "", "qty": 500, "ptype": "Range", "bmin": 220, "bmax": 240, "umin": 0.44, "umax": 0.48, "src": "Original", "ref": "", "weight": "16kg", "air": 170, "sea": 65, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "23×30", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 320, "bmax": 340, "umin": 0.32, "umax": 0.34, "src": "Original", "ref": "", "weight": "32kg", "air": 341, "sea": 98, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "25×30", "inch": "", "qty": 100, "ptype": "Range", "bmin": 100, "bmax": 120, "umin": 1.0, "umax": 1.2, "src": "Original", "ref": "", "weight": "3.4kg", "air": 36, "sea": 39, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "25×30", "inch": "", "qty": 250, "ptype": "Range", "bmin": 200, "bmax": 240, "umin": 0.8, "umax": 0.96, "src": "Original", "ref": "", "weight": "8.5kg", "air": 91, "sea": 50, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "25×30", "inch": "", "qty": 500, "ptype": "Range", "bmin": 260, "bmax": 320, "umin": 0.52, "umax": 0.64, "src": "Original", "ref": "", "weight": "17kg", "air": 181, "sea": 67, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "25×30", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 340, "bmax": 650, "umin": 0.34, "umax": 0.65, "src": "Original", "ref": "", "weight": "34kg", "air": 362, "sea": 102, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "30×38", "inch": "", "qty": 100, "ptype": "Range", "bmin": 100, "bmax": 120, "umin": 1.0, "umax": 1.2, "src": "Original", "ref": "", "weight": "5kg", "air": 53, "sea": 42, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "30×38", "inch": "", "qty": 250, "ptype": "Range", "bmin": 200, "bmax": 240, "umin": 0.8, "umax": 0.96, "src": "Original", "ref": "", "weight": "12.5kg", "air": 133, "sea": 58, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "30×38", "inch": "", "qty": 500, "ptype": "Range", "bmin": 260, "bmax": 320, "umin": 0.52, "umax": 0.64, "src": "Original", "ref": "", "weight": "25kg", "air": 266, "sea": 83, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "30×38", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 340, "bmax": 650, "umin": 0.34, "umax": 0.65, "src": "Original", "ref": "", "weight": "50kg", "air": 532, "sea": 134, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "30×45", "inch": "", "qty": 100, "ptype": "Range", "bmin": 100, "bmax": 120, "umin": 1.0, "umax": 1.2, "src": "Original", "ref": "", "weight": "5.8kg", "air": 62, "sea": 44, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "30×45", "inch": "", "qty": 250, "ptype": "Range", "bmin": 200, "bmax": 240, "umin": 0.8, "umax": 0.96, "src": "Original", "ref": "", "weight": "14.5kg", "air": 154, "sea": 62, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "30×45", "inch": "", "qty": 500, "ptype": "Range", "bmin": 260, "bmax": 320, "umin": 0.52, "umax": 0.64, "src": "Original", "ref": "", "weight": "29kg", "air": 309, "sea": 91, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "30×45", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 340, "bmax": 650, "umin": 0.34, "umax": 0.65, "src": "Original", "ref": "", "weight": "58kg", "air": 618, "sea": 151, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "32×38", "inch": "", "qty": 100, "ptype": "Range", "bmin": 100, "bmax": 120, "umin": 1.0, "umax": 1.2, "src": "Original", "ref": "", "weight": "5.2kg", "air": 55, "sea": 43, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "32×38", "inch": "", "qty": 250, "ptype": "Range", "bmin": 200, "bmax": 240, "umin": 0.8, "umax": 0.96, "src": "Original", "ref": "", "weight": "13kg", "air": 138, "sea": 59, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "32×38", "inch": "", "qty": 500, "ptype": "Range", "bmin": 260, "bmax": 320, "umin": 0.52, "umax": 0.64, "src": "Original", "ref": "", "weight": "26kg", "air": 277, "sea": 85, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "32×38", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 340, "bmax": 650, "umin": 0.34, "umax": 0.65, "src": "Original", "ref": "", "weight": "52kg", "air": 554, "sea": 138, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "35×38", "inch": "", "qty": 100, "ptype": "Range", "bmin": 100, "bmax": 120, "umin": 1.0, "umax": 1.2, "src": "Original", "ref": "", "weight": "5.6kg", "air": 60, "sea": 44, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "35×38", "inch": "", "qty": 250, "ptype": "Range", "bmin": 200, "bmax": 240, "umin": 0.8, "umax": 0.96, "src": "Original", "ref": "", "weight": "14kg", "air": 149, "sea": 61, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "35×38", "inch": "", "qty": 500, "ptype": "Range", "bmin": 260, "bmax": 320, "umin": 0.52, "umax": 0.64, "src": "Original", "ref": "", "weight": "28kg", "air": 298, "sea": 89, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "35×38", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 340, "bmax": 650, "umin": 0.34, "umax": 0.65, "src": "Original", "ref": "", "weight": "56kg", "air": 596, "sea": 147, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "35×45", "inch": "", "qty": 100, "ptype": "Range", "bmin": 120, "bmax": 140, "umin": 1.2, "umax": 1.4, "src": "Original", "ref": "", "weight": "6.6kg", "air": 70, "sea": 46, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "35×45", "inch": "", "qty": 250, "ptype": "Range", "bmin": 240, "bmax": 280, "umin": 0.96, "umax": 1.12, "src": "Original", "ref": "", "weight": "16.5kg", "air": 176, "sea": 66, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "35×45", "inch": "", "qty": 500, "ptype": "Range", "bmin": 330, "bmax": 450, "umin": 0.66, "umax": 0.9, "src": "Original", "ref": "", "weight": "33kg", "air": 351, "sea": 100, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "35×45", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 650, "bmax": 850, "umin": 0.65, "umax": 0.85, "src": "Original", "ref": "", "weight": "66kg", "air": 703, "sea": 167, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "40×45", "inch": "", "qty": 100, "ptype": "Range", "bmin": 120, "bmax": 140, "umin": 1.2, "umax": 1.4, "src": "Original", "ref": "", "weight": "7.2kg", "air": 77, "sea": 47, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "40×45", "inch": "", "qty": 250, "ptype": "Range", "bmin": 240, "bmax": 280, "umin": 0.96, "umax": 1.12, "src": "Original", "ref": "", "weight": "18kg", "air": 192, "sea": 69, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "40×45", "inch": "", "qty": 500, "ptype": "Range", "bmin": 330, "bmax": 450, "umin": 0.66, "umax": 0.9, "src": "Original", "ref": "", "weight": "36kg", "air": 383, "sea": 106, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "40×45", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 650, "bmax": 850, "umin": 0.65, "umax": 0.85, "src": "Original", "ref": "", "weight": "72kg", "air": 767, "sea": 179, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "40×50", "inch": "", "qty": 100, "ptype": "Range", "bmin": 120, "bmax": 140, "umin": 1.2, "umax": 1.4, "src": "Original", "ref": "", "weight": "7.8kg", "air": 83, "sea": 48, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "40×50", "inch": "", "qty": 250, "ptype": "Range", "bmin": 240, "bmax": 280, "umin": 0.96, "umax": 1.12, "src": "Original", "ref": "", "weight": "19.5kg", "air": 208, "sea": 72, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "40×50", "inch": "", "qty": 500, "ptype": "Range", "bmin": 330, "bmax": 450, "umin": 0.66, "umax": 0.9, "src": "Original", "ref": "", "weight": "39kg", "air": 415, "sea": 112, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "40×50", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 650, "bmax": 850, "umin": 0.65, "umax": 0.85, "src": "Original", "ref": "", "weight": "78kg", "air": 831, "sea": 191, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "50×60", "inch": "", "qty": 100, "ptype": "Range", "bmin": 120, "bmax": 140, "umin": 1.2, "umax": 1.4, "src": "Original", "ref": "", "weight": "11kg", "air": 117, "sea": 55, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "50×60", "inch": "", "qty": 250, "ptype": "Range", "bmin": 240, "bmax": 280, "umin": 0.96, "umax": 1.12, "src": "Original", "ref": "", "weight": "27.5kg", "air": 293, "sea": 88, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "50×60", "inch": "", "qty": 500, "ptype": "Range", "bmin": 330, "bmax": 450, "umin": 0.66, "umax": 0.9, "src": "Original", "ref": "", "weight": "55kg", "air": 586, "sea": 144, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "气泡袋 Bubble Mailer", "Type": "", "cm": "50×60", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 650, "bmax": 850, "umin": 0.65, "umax": 0.85, "src": "Original", "ref": "", "weight": "110kg", "air": 1172, "sea": 257, "app": "", "moq": 100, "dim": "W×H", "notes": "区间价；估重(纸+气泡层)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "17×26+4", "inch": "", "qty": 100, "ptype": "Batch", "bmin": 80, "bmax": 80, "umin": 0.8, "umax": 0.8, "src": "Original", "ref": "", "weight": "0.5kg", "air": 5, "sea": 33, "app": "短裤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "17×26+4", "inch": "", "qty": 250, "ptype": "Batch", "bmin": 120, "bmax": 120, "umin": 0.48, "umax": 0.48, "src": "Original", "ref": "", "weight": "1.2kg", "air": 13, "sea": 35, "app": "短裤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "17×26+4", "inch": "", "qty": 500, "ptype": "Batch", "bmin": 220, "bmax": 220, "umin": 0.44, "umax": 0.44, "src": "Original", "ref": "", "weight": "2.5kg", "air": 27, "sea": 37, "app": "短裤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "17×26+4", "inch": "", "qty": 1000, "ptype": "Batch", "bmin": 260, "bmax": 260, "umin": 0.26, "umax": 0.26, "src": "Original", "ref": "", "weight": "5kg", "air": 53, "sea": 42, "app": "短裤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "25.5×33+4", "inch": "", "qty": 100, "ptype": "Batch", "bmin": 90, "bmax": 90, "umin": 0.9, "umax": 0.9, "src": "Original", "ref": "", "weight": "0.9kg", "air": 10, "sea": 34, "app": "T恤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "25.5×33+4", "inch": "", "qty": 250, "ptype": "Batch", "bmin": 140, "bmax": 140, "umin": 0.56, "umax": 0.56, "src": "Original", "ref": "", "weight": "2.2kg", "air": 24, "sea": 37, "app": "T恤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "25.5×33+4", "inch": "", "qty": 500, "ptype": "Batch", "bmin": 240, "bmax": 240, "umin": 0.48, "umax": 0.48, "src": "Original", "ref": "", "weight": "4.5kg", "air": 48, "sea": 41, "app": "T恤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "25.5×33+4", "inch": "", "qty": 1000, "ptype": "Batch", "bmin": 280, "bmax": 280, "umin": 0.28, "umax": 0.28, "src": "Original", "ref": "", "weight": "9kg", "air": 96, "sea": 51, "app": "T恤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "28×38+4", "inch": "", "qty": 100, "ptype": "Batch", "bmin": 100, "bmax": 100, "umin": 1.0, "umax": 1.0, "src": "Original", "ref": "", "weight": "1.2kg", "air": 13, "sea": 35, "app": "T恤+短裤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "28×38+4", "inch": "", "qty": 250, "ptype": "Batch", "bmin": 150, "bmax": 150, "umin": 0.6, "umax": 0.6, "src": "Original", "ref": "", "weight": "3kg", "air": 32, "sea": 38, "app": "T恤+短裤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "28×38+4", "inch": "", "qty": 500, "ptype": "Batch", "bmin": 260, "bmax": 260, "umin": 0.52, "umax": 0.52, "src": "Original", "ref": "", "weight": "6kg", "air": 64, "sea": 45, "app": "T恤+短裤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "28×38+4", "inch": "", "qty": 1000, "ptype": "Batch", "bmin": 330, "bmax": 330, "umin": 0.33, "umax": 0.33, "src": "Original", "ref": "", "weight": "12kg", "air": 128, "sea": 57, "app": "T恤+短裤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "32×41+4", "inch": "", "qty": 100, "ptype": "Batch", "bmin": 100, "bmax": 100, "umin": 1.0, "umax": 1.0, "src": "Original", "ref": "", "weight": "1.5kg", "air": 16, "sea": 35, "app": "T恤+长裤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "32×41+4", "inch": "", "qty": 250, "ptype": "Batch", "bmin": 150, "bmax": 150, "umin": 0.6, "umax": 0.6, "src": "Original", "ref": "", "weight": "3.8kg", "air": 40, "sea": 40, "app": "T恤+长裤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "32×41+4", "inch": "", "qty": 500, "ptype": "Batch", "bmin": 260, "bmax": 260, "umin": 0.52, "umax": 0.52, "src": "Original", "ref": "", "weight": "7.5kg", "air": 80, "sea": 48, "app": "T恤+长裤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "32×41+4", "inch": "", "qty": 1000, "ptype": "Batch", "bmin": 330, "bmax": 330, "umin": 0.33, "umax": 0.33, "src": "Original", "ref": "", "weight": "15kg", "air": 160, "sea": 63, "app": "T恤+长裤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "38×48+4", "inch": "", "qty": 100, "ptype": "Batch", "bmin": 110, "bmax": 110, "umin": 1.1, "umax": 1.1, "src": "Original", "ref": "", "weight": "2kg", "air": 21, "sea": 36, "app": "薄卫衣", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "38×48+4", "inch": "", "qty": 250, "ptype": "Batch", "bmin": 160, "bmax": 160, "umin": 0.64, "umax": 0.64, "src": "Original", "ref": "", "weight": "5kg", "air": 53, "sea": 42, "app": "薄卫衣", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "38×48+4", "inch": "", "qty": 500, "ptype": "Batch", "bmin": 270, "bmax": 270, "umin": 0.54, "umax": 0.54, "src": "Original", "ref": "", "weight": "10kg", "air": 106, "sea": 53, "app": "薄卫衣", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "38×48+4", "inch": "", "qty": 1000, "ptype": "Batch", "bmin": 450, "bmax": 450, "umin": 0.45, "umax": 0.45, "src": "Original", "ref": "", "weight": "20kg", "air": 213, "sea": 73, "app": "薄卫衣", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "45×55+5", "inch": "", "qty": 100, "ptype": "Batch", "bmin": 110, "bmax": 110, "umin": 1.1, "umax": 1.1, "src": "Original", "ref": "", "weight": "2.7kg", "air": 29, "sea": 38, "app": "薄卫衣+T恤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "45×55+5", "inch": "", "qty": 250, "ptype": "Batch", "bmin": 240, "bmax": 240, "umin": 0.96, "umax": 0.96, "src": "Original", "ref": "", "weight": "6.8kg", "air": 72, "sea": 46, "app": "薄卫衣+T恤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "45×55+5", "inch": "", "qty": 500, "ptype": "Batch", "bmin": 280, "bmax": 280, "umin": 0.56, "umax": 0.56, "src": "Original", "ref": "", "weight": "13.5kg", "air": 144, "sea": 60, "app": "薄卫衣+T恤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "45×55+5", "inch": "", "qty": 1000, "ptype": "Batch", "bmin": 420, "bmax": 420, "umin": 0.42, "umax": 0.42, "src": "Original", "ref": "", "weight": "27kg", "air": 288, "sea": 87, "app": "薄卫衣+T恤", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "60×65+5", "inch": "", "qty": 100, "ptype": "Batch", "bmin": 140, "bmax": 140, "umin": 1.4, "umax": 1.4, "src": "Original", "ref": "", "weight": "4.3kg", "air": 46, "sea": 41, "app": "棉衣/较厚衣物", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "60×65+5", "inch": "", "qty": 250, "ptype": "Batch", "bmin": 280, "bmax": 280, "umin": 1.12, "umax": 1.12, "src": "Original", "ref": "", "weight": "10.8kg", "air": 114, "sea": 54, "app": "棉衣/较厚衣物", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "60×65+5", "inch": "", "qty": 500, "ptype": "Batch", "bmin": 360, "bmax": 360, "umin": 0.72, "umax": 0.72, "src": "Original", "ref": "", "weight": "21.5kg", "air": 229, "sea": 76, "app": "棉衣/较厚衣物", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "塑料快递袋 Poly Mailer", "Type": "", "cm": "60×65+5", "inch": "", "qty": 1000, "ptype": "Batch", "bmin": 600, "bmax": 600, "umin": 0.6, "umax": 0.6, "src": "Original", "ref": "", "weight": "43kg", "air": 458, "sea": 120, "app": "棉衣/较厚衣物", "moq": 100, "dim": "W×H+翻边", "notes": "整批价；估重(PE约60μm)推算运费"}, {"Product": "缎面袋 Satin Bag", "Type": "", "cm": "18×30", "inch": "", "qty": 30, "ptype": "Batch", "bmin": 75, "bmax": 75, "umin": 2.5, "umax": 2.5, "src": "Original", "ref": "", "weight": "0.4kg", "air": 5, "sea": 33, "app": "", "moq": 30, "dim": "W×H", "notes": "含logo印刷；估重(布料)推算运费"}, {"Product": "缎面袋 Satin Bag", "Type": "", "cm": "18×30", "inch": "", "qty": 50, "ptype": "Batch", "bmin": 115, "bmax": 115, "umin": 2.3, "umax": 2.3, "src": "Original", "ref": "", "weight": "0.8kg", "air": 8, "sea": 34, "app": "", "moq": 30, "dim": "W×H", "notes": "含logo印刷；估重(布料)推算运费"}, {"Product": "缎面袋 Satin Bag", "Type": "", "cm": "18×30", "inch": "", "qty": 100, "ptype": "Batch", "bmin": 200, "bmax": 200, "umin": 2.0, "umax": 2.0, "src": "Original", "ref": "", "weight": "1.5kg", "air": 16, "sea": 35, "app": "", "moq": 30, "dim": "W×H", "notes": "含logo印刷；估重(布料)推算运费"}, {"Product": "缎面袋 Satin Bag", "Type": "", "cm": "23×30", "inch": "", "qty": 30, "ptype": "Batch", "bmin": 75, "bmax": 75, "umin": 2.5, "umax": 2.5, "src": "Original", "ref": "", "weight": "0.5kg", "air": 6, "sea": 33, "app": "", "moq": 30, "dim": "W×H", "notes": "含logo印刷；估重(布料)推算运费"}, {"Product": "缎面袋 Satin Bag", "Type": "", "cm": "23×30", "inch": "", "qty": 50, "ptype": "Batch", "bmin": 115, "bmax": 115, "umin": 2.3, "umax": 2.3, "src": "Original", "ref": "", "weight": "0.9kg", "air": 10, "sea": 34, "app": "", "moq": 30, "dim": "W×H", "notes": "含logo印刷；估重(布料)推算运费"}, {"Product": "缎面袋 Satin Bag", "Type": "", "cm": "23×30", "inch": "", "qty": 100, "ptype": "Batch", "bmin": 200, "bmax": 200, "umin": 2.0, "umax": 2.0, "src": "Original", "ref": "", "weight": "1.8kg", "air": 19, "sea": 36, "app": "", "moq": 30, "dim": "W×H", "notes": "含logo印刷；估重(布料)推算运费"}, {"Product": "缎面袋 Satin Bag", "Type": "", "cm": "25×35", "inch": "", "qty": 30, "ptype": "Batch", "bmin": 75, "bmax": 75, "umin": 2.5, "umax": 2.5, "src": "Original", "ref": "", "weight": "0.7kg", "air": 7, "sea": 34, "app": "", "moq": 30, "dim": "W×H", "notes": "含logo印刷；估重(布料)推算运费"}, {"Product": "缎面袋 Satin Bag", "Type": "", "cm": "25×35", "inch": "", "qty": 50, "ptype": "Batch", "bmin": 115, "bmax": 115, "umin": 2.3, "umax": 2.3, "src": "Original", "ref": "", "weight": "1.1kg", "air": 12, "sea": 35, "app": "", "moq": 30, "dim": "W×H", "notes": "含logo印刷；估重(布料)推算运费"}, {"Product": "缎面袋 Satin Bag", "Type": "", "cm": "25×35", "inch": "", "qty": 100, "ptype": "Batch", "bmin": 200, "bmax": 200, "umin": 2.0, "umax": 2.0, "src": "Original", "ref": "", "weight": "2.2kg", "air": 23, "sea": 37, "app": "", "moq": 30, "dim": "W×H", "notes": "含logo印刷；估重(布料)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "冲孔", "cm": "#1-2 (15×20~20×30)", "inch": "", "qty": 100, "ptype": "Range", "bmin": 55, "bmax": 60, "umin": 0.55, "umax": 0.6, "src": "Original", "ref": "", "weight": "0.5kg", "air": 5, "sea": 33, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "冲孔", "cm": "#1-2 (15×20~20×30)", "inch": "", "qty": 250, "ptype": "Range", "bmin": 110, "bmax": 120, "umin": 0.44, "umax": 0.48, "src": "Original", "ref": "", "weight": "1.2kg", "air": 13, "sea": 35, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "冲孔", "cm": "#1-2 (15×20~20×30)", "inch": "", "qty": 500, "ptype": "Range", "bmin": 180, "bmax": 190, "umin": 0.36, "umax": 0.38, "src": "Original", "ref": "", "weight": "2.5kg", "air": 27, "sea": 37, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "冲孔", "cm": "#1-2 (15×20~20×30)", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 300, "bmax": 310, "umin": 0.3, "umax": 0.31, "src": "Original", "ref": "", "weight": "5kg", "air": 53, "sea": 42, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "冲孔", "cm": "#3-4 (25×35~30×40)", "inch": "", "qty": 100, "ptype": "Range", "bmin": 65, "bmax": 70, "umin": 0.65, "umax": 0.7, "src": "Original", "ref": "", "weight": "1kg", "air": 11, "sea": 34, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "冲孔", "cm": "#3-4 (25×35~30×40)", "inch": "", "qty": 250, "ptype": "Range", "bmin": 130, "bmax": 140, "umin": 0.52, "umax": 0.56, "src": "Original", "ref": "", "weight": "2.5kg", "air": 27, "sea": 37, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "冲孔", "cm": "#3-4 (25×35~30×40)", "inch": "", "qty": 500, "ptype": "Range", "bmin": 200, "bmax": 210, "umin": 0.4, "umax": 0.42, "src": "Original", "ref": "", "weight": "5kg", "air": 53, "sea": 42, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "冲孔", "cm": "#3-4 (25×35~30×40)", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 320, "bmax": 330, "umin": 0.32, "umax": 0.33, "src": "Original", "ref": "", "weight": "10kg", "air": 106, "sea": 53, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "冲孔", "cm": "#5-6 (35×45~40×50)", "inch": "", "qty": 100, "ptype": "Range", "bmin": 80, "bmax": 90, "umin": 0.8, "umax": 0.9, "src": "Original", "ref": "", "weight": "1.7kg", "air": 18, "sea": 36, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "冲孔", "cm": "#5-6 (35×45~40×50)", "inch": "", "qty": 250, "ptype": "Range", "bmin": 150, "bmax": 170, "umin": 0.6, "umax": 0.68, "src": "Original", "ref": "", "weight": "4.2kg", "air": 45, "sea": 41, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "冲孔", "cm": "#5-6 (35×45~40×50)", "inch": "", "qty": 500, "ptype": "Range", "bmin": 220, "bmax": 240, "umin": 0.44, "umax": 0.48, "src": "Original", "ref": "", "weight": "8.5kg", "air": 91, "sea": 50, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "冲孔", "cm": "#5-6 (35×45~40×50)", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 340, "bmax": 360, "umin": 0.34, "umax": 0.36, "src": "Original", "ref": "", "weight": "17kg", "air": 181, "sea": 67, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "冲孔", "cm": "#7-8 (45×55~50×60)", "inch": "", "qty": 100, "ptype": "Range", "bmin": 100, "bmax": 110, "umin": 1.0, "umax": 1.1, "src": "Original", "ref": "", "weight": "2.5kg", "air": 27, "sea": 37, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "冲孔", "cm": "#7-8 (45×55~50×60)", "inch": "", "qty": 250, "ptype": "Range", "bmin": 190, "bmax": 210, "umin": 0.76, "umax": 0.84, "src": "Original", "ref": "", "weight": "6.2kg", "air": 67, "sea": 45, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "冲孔", "cm": "#7-8 (45×55~50×60)", "inch": "", "qty": 500, "ptype": "Range", "bmin": 260, "bmax": 280, "umin": 0.52, "umax": 0.56, "src": "Original", "ref": "", "weight": "12.5kg", "air": 133, "sea": 58, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "冲孔", "cm": "#7-8 (45×55~50×60)", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 390, "bmax": 420, "umin": 0.39, "umax": 0.42, "src": "Original", "ref": "", "weight": "25kg", "air": 266, "sea": 83, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "软提手", "cm": "#1-2 (15×20~20×30)", "inch": "", "qty": 100, "ptype": "Range", "bmin": 80, "bmax": 90, "umin": 0.8, "umax": 0.9, "src": "Original", "ref": "", "weight": "0.5kg", "air": 5, "sea": 33, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "软提手", "cm": "#1-2 (15×20~20×30)", "inch": "", "qty": 250, "ptype": "Range", "bmin": 150, "bmax": 170, "umin": 0.6, "umax": 0.68, "src": "Original", "ref": "", "weight": "1.2kg", "air": 13, "sea": 35, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "软提手", "cm": "#1-2 (15×20~20×30)", "inch": "", "qty": 500, "ptype": "Range", "bmin": 250, "bmax": 270, "umin": 0.5, "umax": 0.54, "src": "Original", "ref": "", "weight": "2.5kg", "air": 27, "sea": 37, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "软提手", "cm": "#1-2 (15×20~20×30)", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 420, "bmax": 450, "umin": 0.42, "umax": 0.45, "src": "Original", "ref": "", "weight": "5kg", "air": 53, "sea": 42, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "软提手", "cm": "#3-4 (25×35~30×40)", "inch": "", "qty": 100, "ptype": "Range", "bmin": 100, "bmax": 120, "umin": 1.0, "umax": 1.2, "src": "Original", "ref": "", "weight": "1kg", "air": 11, "sea": 34, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "软提手", "cm": "#3-4 (25×35~30×40)", "inch": "", "qty": 250, "ptype": "Range", "bmin": 190, "bmax": 220, "umin": 0.76, "umax": 0.88, "src": "Original", "ref": "", "weight": "2.5kg", "air": 27, "sea": 37, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "软提手", "cm": "#3-4 (25×35~30×40)", "inch": "", "qty": 500, "ptype": "Range", "bmin": 300, "bmax": 340, "umin": 0.6, "umax": 0.68, "src": "Original", "ref": "", "weight": "5kg", "air": 53, "sea": 42, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "塑料袋 Plastic Bag", "Type": "软提手", "cm": "#3-4 (25×35~30×40)", "inch": "", "qty": 1000, "ptype": "Range", "bmin": 500, "bmax": 560, "umin": 0.5, "umax": 0.56, "src": "Original", "ref": "", "weight": "10kg", "air": 106, "sea": 53, "app": "", "moq": 100, "dim": "W×H", "notes": "含1色1面印刷；估重(LDPE约50μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "20×30", "inch": "", "qty": 2000, "ptype": "Batch", "bmin": 89, "bmax": 89, "umin": 0.0445, "umax": 0.0445, "src": "Original", "ref": "", "weight": "6kg", "air": 64, "sea": 45, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "20×30", "inch": "", "qty": 5000, "ptype": "Batch", "bmin": 115, "bmax": 115, "umin": 0.023, "umax": 0.023, "src": "Original", "ref": "", "weight": "15kg", "air": 160, "sea": 63, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "20×30", "inch": "", "qty": 10000, "ptype": "Batch", "bmin": 179, "bmax": 179, "umin": 0.0179, "umax": 0.0179, "src": "Original", "ref": "", "weight": "30kg", "air": 320, "sea": 93, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "20×30", "inch": "", "qty": 20000, "ptype": "Batch", "bmin": 279, "bmax": 279, "umin": 0.014, "umax": 0.014, "src": "Original", "ref": "", "weight": "60kg", "air": 639, "sea": 155, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "25×40", "inch": "", "qty": 2000, "ptype": "Batch", "bmin": 109, "bmax": 109, "umin": 0.0545, "umax": 0.0545, "src": "Reference", "ref": "28×45", "weight": "14kg", "air": 149, "sea": 61, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "25×40", "inch": "", "qty": 5000, "ptype": "Batch", "bmin": 159, "bmax": 159, "umin": 0.0318, "umax": 0.0318, "src": "Reference", "ref": "28×45", "weight": "35kg", "air": 373, "sea": 104, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "25×40", "inch": "", "qty": 10000, "ptype": "Batch", "bmin": 269, "bmax": 269, "umin": 0.0269, "umax": 0.0269, "src": "Reference", "ref": "28×45", "weight": "70kg", "air": 746, "sea": 175, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "25×40", "inch": "", "qty": 20000, "ptype": "Batch", "bmin": 479, "bmax": 479, "umin": 0.0239, "umax": 0.0239, "src": "Reference", "ref": "28×45", "weight": "140kg", "air": 1491, "sea": 318, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "28×45", "inch": "", "qty": 2000, "ptype": "Batch", "bmin": 109, "bmax": 109, "umin": 0.0545, "umax": 0.0545, "src": "Original", "ref": "", "weight": "14kg", "air": 149, "sea": 61, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "28×45", "inch": "", "qty": 5000, "ptype": "Batch", "bmin": 159, "bmax": 159, "umin": 0.0318, "umax": 0.0318, "src": "Original", "ref": "", "weight": "35kg", "air": 373, "sea": 104, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "28×45", "inch": "", "qty": 10000, "ptype": "Batch", "bmin": 269, "bmax": 269, "umin": 0.0269, "umax": 0.0269, "src": "Original", "ref": "", "weight": "70kg", "air": 746, "sea": 175, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "28×45", "inch": "", "qty": 20000, "ptype": "Batch", "bmin": 479, "bmax": 479, "umin": 0.0239, "umax": 0.0239, "src": "Original", "ref": "", "weight": "140kg", "air": 1491, "sea": 318, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "30×48", "inch": "", "qty": 2000, "ptype": "Batch", "bmin": 109, "bmax": 109, "umin": 0.0545, "umax": 0.0545, "src": "Reference", "ref": "28×45", "weight": "18kg", "air": 192, "sea": 69, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "30×48", "inch": "", "qty": 5000, "ptype": "Batch", "bmin": 159, "bmax": 159, "umin": 0.0318, "umax": 0.0318, "src": "Reference", "ref": "28×45", "weight": "45kg", "air": 479, "sea": 124, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "30×48", "inch": "", "qty": 10000, "ptype": "Batch", "bmin": 269, "bmax": 269, "umin": 0.0269, "umax": 0.0269, "src": "Reference", "ref": "28×45", "weight": "90kg", "air": 958, "sea": 216, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "30×48", "inch": "", "qty": 20000, "ptype": "Batch", "bmin": 479, "bmax": 479, "umin": 0.0239, "umax": 0.0239, "src": "Reference", "ref": "28×45", "weight": "180kg", "air": 1917, "sea": 399, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "35×55", "inch": "", "qty": 2000, "ptype": "Batch", "bmin": 139, "bmax": 139, "umin": 0.0695, "umax": 0.0695, "src": "Original", "ref": "", "weight": "22kg", "air": 234, "sea": 77, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "35×55", "inch": "", "qty": 5000, "ptype": "Batch", "bmin": 229, "bmax": 229, "umin": 0.0458, "umax": 0.0458, "src": "Original", "ref": "", "weight": "55kg", "air": 586, "sea": 144, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "35×55", "inch": "", "qty": 10000, "ptype": "Batch", "bmin": 389, "bmax": 389, "umin": 0.0389, "umax": 0.0389, "src": "Original", "ref": "", "weight": "110kg", "air": 1172, "sea": 257, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "35×55", "inch": "", "qty": 20000, "ptype": "Batch", "bmin": 699, "bmax": 699, "umin": 0.035, "umax": 0.035, "src": "Original", "ref": "", "weight": "220kg", "air": 2343, "sea": 481, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "40×60", "inch": "", "qty": 2000, "ptype": "Batch", "bmin": 139, "bmax": 139, "umin": 0.0695, "umax": 0.0695, "src": "Reference", "ref": "35×55", "weight": "26kg", "air": 277, "sea": 85, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "40×60", "inch": "", "qty": 5000, "ptype": "Batch", "bmin": 229, "bmax": 229, "umin": 0.0458, "umax": 0.0458, "src": "Reference", "ref": "35×55", "weight": "65kg", "air": 692, "sea": 165, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "40×60", "inch": "", "qty": 10000, "ptype": "Batch", "bmin": 389, "bmax": 389, "umin": 0.0389, "umax": 0.0389, "src": "Reference", "ref": "35×55", "weight": "130kg", "air": 1384, "sea": 297, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}, {"Product": "背心袋 Vest Bag", "Type": "", "cm": "40×60", "inch": "", "qty": 20000, "ptype": "Batch", "bmin": 699, "bmax": 699, "umin": 0.035, "umax": 0.035, "src": "Reference", "ref": "35×55", "weight": "260kg", "air": 2769, "sea": 563, "app": "", "moq": 2000, "dim": "W×H", "notes": "含1色1面印刷；估重(HDPE约30μm)推算运费"}];
+
+function dbPrice(r){
+  if(r.ptype==='Unit') return '—';
+  if(r.bmin==null) return '—';
+  if(r.ptype==='Range') return '$'+r.bmin+'–$'+r.bmax;
+  return '$'+r.bmin;
+}
+function dbUnit(r){
+  if(r.umin==null) return '—';
+  return (r.umin===r.umax) ? '$'+r.umin.toFixed(2) : '$'+r.umin.toFixed(2)+'–$'+r.umax.toFixed(2);
+}
+function renderDB(){
+  const prod = $('dbProduct').value;
+  const q = ($('dbSearch').value||'').trim().toLowerCase();
+  const filtered = DB_ROWS.filter(r=>{
+    if(prod && r.Product!==prod) return false;
+    if(!q) return true;
+    return [r.Product,r.Type,r.cm,r.inch,r.app,r.src,r.weight].join(' ').toLowerCase().includes(q);
+  });
+  $('dbCount').textContent = '共 ' + filtered.length + ' 条（总计 ' + DB_ROWS.length + ' 条）';
+  let h = '<thead><tr><th>品类</th><th>袋型/方向</th><th>尺寸</th><th>数量</th><th>计价</th><th>整批价</th><th>单个价</th><th>来源</th><th>重量</th><th>空运</th><th>海运</th><th>用途</th><th>MOQ</th></tr></thead><tbody>';
+  for(const r of filtered){
+    const src = r.src==='Reference' ? ('参考'+(r.ref?('→'+r.ref):'')) : '原价';
+    const qty = r.qty==='per pc' ? '按个' : r.qty;
+    const size = r.inch ? (r.cm + ' / ' + r.inch) : r.cm;
+    h += '<tr>'
+      + '<td>'+r.Product+'</td>'
+      + '<td>'+(r.Type||'')+'</td>'
+      + '<td>'+size+'</td>'
+      + '<td>'+qty+'</td>'
+      + '<td>'+r.ptype+'</td>'
+      + '<td>'+dbPrice(r)+'</td>'
+      + '<td>'+dbUnit(r)+'</td>'
+      + '<td class="'+(r.src==='Reference'?'ref':'')+'">'+src+'</td>'
+      + '<td>'+(r.weight||'')+'</td>'
+      + '<td>'+(r.air!=null?('$'+r.air):'')+'</td>'
+      + '<td>'+(r.sea!=null?('$'+r.sea):'')+'</td>'
+      + '<td>'+(r.app||'')+'</td>'
+      + '<td>'+r.moq+'</td>'
+      + '</tr>';
+  }
+  h += '</tbody>';
+  $('dbTable').innerHTML = h;
+}
+
+const prodSel = $('dbProduct');
+prodSel.innerHTML = '<option value="">全部品类</option>' + [...new Set(DB_ROWS.map(r=>r.Product))].map(p=>`<option>${p}</option>`).join('');
+prodSel.onchange = renderDB;
+$('dbSearch').oninput = renderDB;
+renderDB();
+</script>
+</body>
+</html>
