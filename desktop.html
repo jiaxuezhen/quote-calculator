@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="quote-release" content="2026-11-10-destinations-and-cost">
 <title>多产品报价计算器 · Custom Packaging</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--line:#e5e7eb;--text:#1f2937;--muted:#6b7280;--accent:#2563eb;--green:#16a34a;--danger:#dc2626;--navy:#17365d;--shadow:0 1px 3px rgba(0,0,0,.08)}
@@ -28,16 +29,24 @@ label{display:block;font-size:13px;font-weight:600;margin:11px 0 4px} select,inp
 @media(max-width:520px){.logistics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .weight-lookup{margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--line)}.weight-lookup .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,145px),1fr))}.weight-lookup output{display:block}
 .smallrule{color:#1d4ed8;font-weight:700}
+.quote-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.quote-tabs [aria-pressed="true"]{background:var(--accent);color:white}
+.cost-preview{min-height:1.5em;margin:10px 0;color:var(--navy);font-weight:650}
+.cost-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 10px}
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>多产品报价计算器 · 定制包装</h1>
-  <p class="sub">选择产品、规格和数量，加入报价单后即可计算美元总价并复制报价摘要。</p>
+  <div class="quote-tabs" role="group" aria-label="报价方式">
+    <button type="button" class="btn btn-ghost" id="salesTab" aria-controls="salesEditor" aria-pressed="true">多产品报价</button>
+    <button type="button" class="btn btn-ghost" id="costTab" aria-controls="costEditor" aria-pressed="false">成本报价</button>
+  </div>
+  <p class="sub">浏览器版支持产品报价、估重、本地费率和手工运费。阿里实时运费请在授权工作台查询。</p>
 
   <div class="grid">
     <div>
-      <div class="card">
+      <div class="card" id="salesEditor">
         <h2>① 添加产品</h2>
         <label>产品品类</label><select id="product"></select>
         <label>尺寸 / 规格</label><select id="size"></select>
@@ -49,11 +58,26 @@ label{display:block;font-size:13px;font-weight:600;margin:11px 0 4px} select,inp
         <button class="btn btn-primary" id="addBtn">＋ Add Product / 添加到报价单</button>
       </div>
 
+      <form class="card" id="costEditor" hidden>
+        <h2>① 按出厂成本报价</h2>
+        <p class="hint">填写已核实的出厂价，按所选比例计算货值。运费另计。</p>
+        <div class="cost-grid">
+          <div><label for="costProduct">产品</label><select id="costProduct"></select></div>
+          <div><label for="costSize">规格</label><input id="costSize" list="costSizes" required maxlength="100" placeholder="如 15×15×5"><datalist id="costSizes"></datalist></div>
+          <div><label for="costQty">数量</label><input id="costQty" type="number" min="1" step="1" required></div>
+          <div><label for="costAmount">出厂价 CNY</label><input id="costAmount" type="number" min="0.01" step="any" required></div>
+          <div><label for="costBasis">计价方式</label><select id="costBasis"><option value="unit">单价（元/个）</option><option value="batch">整批价（元/批）</option></select></div>
+          <div><label for="saleRatio">售价 ÷ 成本</label><select id="saleRatio"><option value="2">200%</option><option value="1.9">190%</option><option value="1.8">180%</option><option value="1.7">170%</option></select></div>
+        </div>
+        <div id="costPreview" class="cost-preview hint" aria-live="polite"></div>
+        <button class="btn btn-primary" id="addCostBtn">＋ 添加到成本报价单</button>
+      </form>
+
       <div class="card shipbox">
         <h2>② 包装与物流</h2>
         <div class="hint">运费按整单估算。填了外箱数据时，按毛重和体积重取大。已有承运商报价时，可选择「手动输入」。</div>
         <div class="logistics-grid">
-          <div><label for="destination">目的地国家</label><input id="destination" list="destinationOptions" value="美国" autocomplete="off"></div>
+          <div><label for="destination">目的地国家或地区</label><input id="destination" list="destinationOptions" value="美国" autocomplete="off"></div>
           <datalist id="destinationOptions"><option value="美国"><option value="加拿大"><option value="英国"><option value="澳大利亚"><option value="新加坡"><option value="阿联酋"></datalist>
           <div><label for="zip">目的地邮编</label><input id="zip" placeholder="如 10001" autocomplete="off"></div>
           <div><label for="zipPrefix">美国 ZIP 首位</label><input id="zipPrefix" inputmode="numeric" maxlength="1" placeholder="如 9"></div>
@@ -90,6 +114,7 @@ label{display:block;font-size:13px;font-weight:600;margin:11px 0 4px} select,inp
         <div class="hint" id="weightInfo"></div>
         <div class="warn" id="weightWarn"></div>
         <div class="freight-source" id="freightSource" role="status"></div>
+        <p class="hint" id="freightDifference" hidden></p>
       </div>
     </div>
 
@@ -98,7 +123,7 @@ label{display:block;font-size:13px;font-weight:600;margin:11px 0 4px} select,inp
         <h2>③ 当前报价单产品</h2>
         <div id="cartEmpty" class="empty">还没有产品，左侧选择产品后点击“添加到报价单”。</div>
         <div style="overflow:auto"><table class="items" id="cartTable" style="display:none">
-          <thead><tr><th>#</th><th>产品</th><th>规格</th><th>Qty</th><th class="money">货值</th><th class="money">工艺</th><th></th></tr></thead>
+          <thead><tr><th>#</th><th>产品</th><th>规格</th><th>Qty</th><th class="money">货值</th><th class="money" id="cartCostHeader" hidden>出厂价 CNY</th><th class="money">工艺</th><th></th></tr></thead>
           <tbody id="cartBody"></tbody>
         </table></div>
       </div>
@@ -170,11 +195,26 @@ const US_FREIGHT = {
   }
 };
 let cart = [];
+let costView = false;
+const quoteViews = new Map();
 let freightIssue = '';
 let manualBasis = null;
 let weightBasis = null;
 const $ = id => document.getElementById(id);
 const fmt = n => '$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const cny = n => '¥'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({
+  '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+}[char]));
+
+function exchangeRate(){
+  const rate=Number($('exchangeRate').value);
+  return Number.isFinite(rate)&&rate>0?rate:0;
+}
+
+function itemPrice(item){
+  return costView ? item.saleCny/(exchangeRate()||Infinity) : item.price;
+}
 
 const weightKg = kg => Number(kg.toFixed(3));
 const normalizeWeightSize = value => value.normalize('NFKC').toLowerCase().replace(/[×*]/g, 'x')
@@ -300,15 +340,20 @@ $('addBtn').onclick=()=>{
 };
 
 function renderCart(){
+  $('cartCostHeader').hidden=!costView;
+  $('cartEmpty').textContent=costView
+    ? '填写出厂价和销售比例后，添加到成本报价单。'
+    : '还没有产品，左侧选择产品后点击“添加到报价单”。';
   $('cartEmpty').style.display=cart.length?'none':'block';
   $('cartTable').style.display=cart.length?'table':'none';
   $('cartBody').innerHTML=cart.map((x,i)=>`
     <tr>
       <td>${i+1}</td>
       <td>${x.product}${x.src==='SmallQtyRule'?'<div class="smallrule">SmallQtyRule</div>':''}</td>
-      <td>${x.size}${x.quoteAddons.length?'<div class="hint">需另报：'+x.quoteAddons.join(' / ')+'</div>':''}</td>
+      <td>${escapeHtml(x.size)}${x.quoteAddons.length?'<div class="hint">需另报：'+x.quoteAddons.join(' / ')+'</div>':''}</td>
       <td>${x.qty}</td>
-      <td class="money">${fmt(x.price)}</td>
+      <td class="money">${costView&&!exchangeRate()?'待确认':fmt(itemPrice(x))}</td>
+      ${costView?`<td class="money">${cny(x.costCny)}</td>`: ''}
       <td class="money">${fmt(x.addon)}</td>
       <td><button class="btn btn-danger" onclick="removeItem(${i})">删除</button></td>
     </tr>`).join('');
@@ -411,7 +456,13 @@ function updateShipping(){
   const mode = $('shipMode').value;
   const usMode = mode.startsWith('us_');
   const estimateMode = usMode || mode === 'air' || mode === 'sea';
-  const isUS = /^(美国|us|usa|united states)$/i.test($('destination').value.trim());
+  const isUS = /^(美国(?: US)?|us|usa|united states)$/i.test($('destination').value.trim());
+  const comparison=$('freightDifference');
+  comparison.hidden=Boolean(packaging?.error)||!(chargeWeight>0)||!Number.isFinite(chargeWeight);
+  if(!comparison.hidden){
+    const air=shipEstimate('air',chargeWeight), sea=shipEstimate('sea',chargeWeight);
+    comparison.textContent=`报价库粗估 · 空运 ${fmt(air)} · 海运 ${fmt(sea)} · 差 ${fmt(Math.abs(air-sea))}`;
+  }
   const roundKg = kg => Number(kg.toFixed(2));
   $('packageInfo').textContent = packaging?.error || (packaging
     ? `外箱总毛重 ${roundKg(packaging.grossTotal)} kg · 总体积重 ${roundKg(packaging.volumeTotal)} kg（÷6000）` : '');
@@ -478,11 +529,13 @@ for (const id of ['destination', 'zip', 'exchangeRate', ...packageFields]) {
       $('zip').value = '';
       $('zipPrefix').value = '';
     }
-    updateSummary();
+    if(id==='exchangeRate'&&costView)renderCart();
+    else updateSummary();
   });
 }
 
 function quoteProblem() {
+  if(costView&&!exchangeRate())return '请填写有效汇率。';
   return freightIssue || (cart.some(item => item.quoteAddons.length) ? '工艺费用待确认。' : '');
 }
 
@@ -493,7 +546,8 @@ function updateSummary(){
     weightBasis = null;
   }
   updateShipping();
-  const items = cart.reduce((sum, item) => sum + item.price, 0);
+  const items = cart.reduce((sum, item) => sum + itemPrice(item), 0);
+  if(costView)renderCostPreview();
   const addons = cart.reduce((sum, item) => sum + item.addon, 0);
   const shipping = Number($('shipping').value) || 0;
   $('rCount').textContent = cart.length;
@@ -506,7 +560,7 @@ function updateSummary(){
 $('copyQuoteBtn').onclick = async () => {
   const problem = !cart.length ? '请先添加产品。' : quoteProblem();
   if (problem) { $('copyStatus').textContent = problem; return; }
-  const lines = cart.map(item => `${item.product} | ${item.size} | ${item.qty} pcs | ${fmt(item.price + item.addon)}`);
+  const lines = cart.map(item => `${item.product} | ${item.size} | ${item.qty} pcs | ${fmt(itemPrice(item) + item.addon)}`);
   const mode = $('shipMode');
   lines.push(mode.value === 'none' ? 'Shipping: excluded' : `Shipping (${mode.selectedOptions[0].textContent}): ${fmt($('shipping').value)}`);
   lines.push(`Total (USD): ${$('rTotal').textContent}`);
@@ -568,6 +622,88 @@ function renderDb(){
     ].map(v=>`<td>${v??''}</td>`).join('')+'</tr>').join('')+'</tbody>';
 }
 
+function buildDestinations(){
+  const list=$('destinationOptions');
+  const names=new Intl.DisplayNames(['zh-CN'],{type:'region',style:'short'});
+  const codes=`
+    AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI
+    BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CO
+    CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM
+    FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN
+    HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP
+    KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML
+    MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR
+    NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA
+    SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG
+    TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN
+    VU WF WS YE YT ZA ZM ZW
+  `.trim().split(/\s+/);
+  const suggestions=codes.map(code=>`${names.of(code)} ${code}`).sort((a,b)=>a.localeCompare(b,'zh-CN'));
+  list.replaceChildren(...suggestions.map(name=>new Option('',name)));
+}
+
+function costSelection(){
+  const product=PRODUCTS.find(entry=>entry.id===$('costProduct').value);
+  const size=$('costSize').value.trim();
+  const qty=Number($('costQty').value), amount=Number($('costAmount').value);
+  if(!product||!size||!Number.isSafeInteger(qty)||qty<1||!(amount>0))return null;
+  const total=$('costBasis').value==='unit'?amount*qty:amount;
+  const sale=total*Number($('saleRatio').value);
+  if(!Number.isFinite(sale)||sale>Number.MAX_SAFE_INTEGER/100)return null;
+  const sizes=matchingWeightSizes(product,size);
+  const estimate=sizes.length===1?estimateCatalogWeight(product,sizes[0],qty):null;
+  return {product:product.name,size,qty,costCny:Math.round(total*100)/100,
+    saleCny:Math.round(sale*100)/100,addon:0,quoteAddons:[],weight:estimate?.kg??null};
+}
+
+function renderCostPreview(){
+  const item=costSelection(), rate=exchangeRate();
+  $('addCostBtn').disabled=!item||!rate;
+  $('costPreview').textContent=item
+    ? `整批成本 ${cny(item.costCny)} · 卖价 ${cny(item.saleCny)}${rate?` / ${fmt(item.saleCny/rate)}`:''}`
+    : '填写规格、数量和出厂价后显示卖价。';
+}
+
+function fillCostSizes(){
+  const product=PRODUCTS.find(entry=>entry.id===$('costProduct').value);
+  $('costSizes').replaceChildren(...product.sizes.map(size=>new Option('',size.label)));
+}
+
+const quoteFreightFields=['destination','zip','zipPrefix',...packageFields,'billableWeight','shipMode','shipping','exchangeRate'];
+function captureQuoteView(){
+  return {cart,manualBasis,weightBasis,values:quoteFreightFields.map(id=>$(id).value)};
+}
+
+function showQuoteView(cost){
+  if(cost===costView)return;
+  const previous=captureQuoteView();
+  quoteViews.set(costView,previous);
+  const next=quoteViews.get(cost)||{...emptyQuoteView,cart:[]};
+  costView=cost;
+  ({cart,manualBasis,weightBasis}=next);
+  quoteFreightFields.forEach((id,index)=>{$(id).value=next.values[index];});
+  $('salesEditor').hidden=cost;
+  $('costEditor').hidden=!cost;
+  $('salesTab').setAttribute('aria-pressed',String(!cost));
+  $('costTab').setAttribute('aria-pressed',String(cost));
+  renderCart();
+}
+
+buildDestinations();
+$('costProduct').replaceChildren(...PRODUCTS.map(product=>new Option(product.name,product.id)));
+fillCostSizes();
+$('costProduct').addEventListener('change',()=>{$('costSize').value='';fillCostSizes();renderCostPreview();});
+$('costEditor').addEventListener('input',renderCostPreview);
+$('costEditor').addEventListener('submit',event=>{
+  event.preventDefault();
+  const item=costSelection();
+  if(!item||!exchangeRate())return;
+  cart.push(item);
+  renderCart();
+});
+$('salesTab').onclick=()=>showQuoteView(false);
+$('costTab').onclick=()=>showQuoteView(true);
+const emptyQuoteView=captureQuoteView();
 buildProducts(); buildDb(); renderCart();
 </script>
 </body>
