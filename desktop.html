@@ -26,13 +26,14 @@ label{display:block;font-size:13px;font-weight:600;margin:11px 0 4px} select,inp
 .freight-source strong{display:block;margin-bottom:2px}
 .summary .v{text-align:right;overflow-wrap:anywhere}
 @media(max-width:520px){.logistics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.weight-lookup{margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--line)}.weight-lookup .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,145px),1fr))}.weight-lookup output{display:block}
 .smallrule{color:#1d4ed8;font-weight:700}
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>多产品报价计算器 · 定制包装</h1>
-  <p class="sub">数据库来源：1quotation-database-paperbag-mailer-lowqty.xlsx · 一张报价单可同时添加多个产品</p>
+  <p class="sub">选择产品、规格和数量，加入报价单后即可计算美元总价并复制报价摘要。</p>
 
   <div class="grid">
     <div>
@@ -43,13 +44,14 @@ label{display:block;font-size:13px;font-weight:600;margin:11px 0 4px} select,inp
         <div class="hint" id="sizeHint"></div>
         <label>数量</label><div id="qtyWrap"></div>
         <div class="hint" id="priceHint"></div>
+        <div class="hint" id="productWeightHint" aria-live="polite"></div>
         <div id="addonsBox" style="margin-top:12px"></div>
         <button class="btn btn-primary" id="addBtn">＋ Add Product / 添加到报价单</button>
       </div>
 
       <div class="card shipbox">
         <h2>② 包装与物流</h2>
-        <div class="hint">合并整单估算运费。知道外箱数据时，可按实重与体积重取大。阿里实时运费请在本机工作台查询，查到的价格也可以在此手动录入。</div>
+        <div class="hint">运费按整单估算。填了外箱数据时，按毛重和体积重取大。已有承运商报价时，可选择「手动输入」。</div>
         <div class="logistics-grid">
           <div><label for="destination">目的地国家</label><input id="destination" list="destinationOptions" value="美国" autocomplete="off"></div>
           <datalist id="destinationOptions"><option value="美国"><option value="加拿大"><option value="英国"><option value="澳大利亚"><option value="新加坡"><option value="阿联酋"></datalist>
@@ -116,6 +118,16 @@ label{display:block;font-size:13px;font-weight:600;margin:11px 0 4px} select,inp
 
   <div class="card dbwrap">
     <h2>📋 完整报价数据库</h2>
+    <div class="weight-lookup">
+      <strong>按尺寸和数量估重</strong>
+      <div class="row">
+        <div><label for="weightProduct">产品品类</label><select id="weightProduct"></select></div>
+        <div><label for="weightSize">尺寸 / 规格</label><input id="weightSize" list="weightSizeOptions" placeholder="例如 16×7×13"><datalist id="weightSizeOptions"></datalist></div>
+        <div><label for="weightQty">数量</label><input id="weightQty" type="number" min="1" step="1" placeholder="例如 75"></div>
+      </div>
+      <output class="hint" id="dbWeightEstimate" aria-live="polite">选择品类，填写尺寸和数量后查看重量。</output>
+      <p class="hint">报价库重量供估算。正式运费以实际装箱毛重和承运商的体积重规则为准。</p>
+    </div>
     <div class="row">
       <div><label>筛选品类</label><select id="dbProduct"></select></div>
       <div><label>搜索尺寸 / 袋型 / 用途</label><input id="dbSearch" type="text" placeholder="如 25×20×7 / 横版 / T恤"></div>
@@ -164,14 +176,44 @@ let weightBasis = null;
 const $ = id => document.getElementById(id);
 const fmt = n => '$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 
-function parseWeight(text, qty){
-  if(!text) return null;
-  const m = String(text).match(/([0-9.]+)kg(?:\/([0-9.]+)pcs)?/i);
-  if(!m) return null;
-  const kg = parseFloat(m[1]);
-  const baseQty = m[2] ? parseFloat(m[2]) : qty;
-  if(!baseQty || !qty) return kg;
-  return kg/baseQty*qty;
+const weightKg = kg => Number(kg.toFixed(3));
+const normalizeWeightSize = value => value.normalize('NFKC').toLowerCase().replace(/[×*]/g, 'x')
+  .replace(/\s+/g, '').replace(/(?:cm|厘米)$/u, '');
+
+function estimateCatalogWeight(product, size, count) {
+  if (!Number.isSafeInteger(count) || count < 1) return null;
+  const byQuantity = new Map();
+  for (const row of DB_ROWS) {
+    if (row.Product !== product.name || row.Type !== size.type || row.cm !== size.cm) continue;
+    const match = String(row.weight || '').match(/^([\d.]+)\s*kg(?:\s*\/\s*(\d+)\s*pcs)?$/i);
+    if (!match) continue;
+    const kg = Number(match[1]);
+    const qty = Number(match[2] || row.qty);
+    if (!Number.isFinite(kg) || kg <= 0 || !Number.isSafeInteger(qty) || qty < 1) continue;
+    const prior = byQuantity.get(qty);
+    if (!prior || row.src === 'Original') byQuantity.set(qty, {qty, kg, ref: row.src === 'Reference' ? row.ref : ''});
+  }
+  const label = point => `${point.qty} 个 ${weightKg(point.kg)} kg${point.ref ? `（原表参考 ${point.ref}）` : ''}`;
+  const exact = byQuantity.get(count);
+  if (exact) return {kg: exact.kg, detail: `报价库记录 ${label(exact)}`};
+  const sorted = [...byQuantity.values()].sort((a, b) => a.qty - b.qty);
+  const upperIndex = sorted.findIndex(point => point.qty > count);
+  if (upperIndex > 0) {
+    const lower = sorted[upperIndex - 1];
+    const upper = sorted[upperIndex];
+    const kg = lower.kg + (upper.kg - lower.kg) * (count - lower.qty) / (upper.qty - lower.qty);
+    return {kg, detail: `按 ${label(lower)} 和 ${label(upper)} 两档插值`};
+  }
+  const anchor = upperIndex === 0 ? sorted[0] : sorted.at(-1);
+  if (!anchor) return null;
+  const kg = anchor.kg / anchor.qty * count;
+  return {kg, detail: `按同规格 ${label(anchor)} 等比例估算`};
+}
+
+function matchingWeightSizes(product, dimension) {
+  const query = normalizeWeightSize(dimension);
+  const labelMatch = product.sizes.find(spec => normalizeWeightSize(spec.label) === query);
+  return labelMatch ? [labelMatch] : product.sizes.filter(spec => normalizeWeightSize(spec.cm) === query);
 }
 
 function currentProduct(){ return PRODUCTS.find(p=>p.id===$('product').value); }
@@ -220,13 +262,13 @@ function getSelection(){
   if(!p||!s) return null;
   const qty=Number($('qty').value);
   if (!Number.isSafeInteger(qty) || qty < (s.mode === 'unit' ? s.moq || 1 : 1)) return null;
-  let bmin=0,bmax=0,src='',rowWeight=null,notes='';
+  let bmin=0,bmax=0,src='',notes='';
   if(s.mode==='unit'){
     bmin=(s.unitMin||0)*qty; bmax=(s.unitMax||s.unitMin||0)*qty; src='Original';
   } else {
     const t=s.tiers.find(x=>x.qty===qty);
     if(!t) return null;
-    bmin=t.bmin; bmax=t.bmax; src=t.src; rowWeight=t.weight; notes=t.notes;
+    bmin=t.bmin; bmax=t.bmax; src=t.src; notes=t.notes;
   }
   const price=(bmin+bmax)/2;
   const addonChecks=[...document.querySelectorAll('.addonCheck:checked')];
@@ -235,25 +277,17 @@ function getSelection(){
     const a=p.addons[parseInt(c.dataset.i)];
     if(a.quote) quoteAddons.push(a.label); else addon+=Number(a.price||0)*(a.perUnit?qty:1);
   });
-  let weight=parseWeight(rowWeight,qty);
-  if (weight == null) weight = parseWeight(s.weights.find(w => w.qty === qty)?.weight, qty);
-  if(weight==null){
-    for(const w of s.weights){
-      if(typeof w.qty==='number'){
-        const pw=parseWeight(w.weight,Number(w.qty));
-        if(pw!=null){ weight=pw/Number(w.qty)*qty; break; }
-      } else {
-        const pw=parseWeight(w.weight,qty);
-        if(pw!=null){ weight=pw; break; }
-      }
-    }
-  }
-  return {productId:p.id,product:p.name,size:s.label,qty,bmin,bmax,price,addon,quoteAddons,src,weight,notes};
+  const estimate = estimateCatalogWeight(p, s, qty);
+  return {productId:p.id,product:p.name,size:s.label,qty,bmin,bmax,price,addon,quoteAddons,src,
+    weight:estimate?.kg ?? null, weightDetail:estimate?.detail || '', notes};
 }
 
 function previewPrice(){
   const x=getSelection();
   $('addBtn').disabled = !x;
+  $('productWeightHint').textContent = !x ? '' : x.weight == null
+    ? '该规格暂无报价库重量记录。'
+    : `参考重量 ${weightKg(x.weight)} kg · ${x.weightDetail}`;
   if (!x) { $('priceHint').textContent = '请输入有效数量，并满足该规格的起订量。'; return; }
   const range=x.bmin!==x.bmax?` · 区间 ${fmt(x.bmin)}–${fmt(x.bmax)}，当前取中值`:'';
   const source=x.src==='SmallQtyRule'?' · 小批量规则':'';
@@ -295,7 +329,7 @@ function shipEstimate(mode,w){
 }
 function usRegion(){
   const fullZip = $('zip').value.trim();
-  const digit = /^\d{5}(?:-\d{4})?$/.test(fullZip) ? fullZip[0] : $('zipPrefix').value.trim();
+  const digit = fullZip ? (/^\d{5}(?:-\d{4})?$/.test(fullZip) ? fullZip[0] : '') : $('zipPrefix').value.trim();
   if(/^[89]$/.test(digit))return {key:'west',label:'美国西部'};
   if(/^[4-7]$/.test(digit))return {key:'central',label:'美国中部'};
   if(/^[0-3]$/.test(digit))return {key:'east',label:'美国东部'};
@@ -320,7 +354,7 @@ function usFreightEstimate(mode,weight){
     return {usd:rate.rmb/exchange,rmb:rate.rmb,detail:`按 ${rate.rounded}kg 档位；美国本土48州；约 6-10 个自然日`};
   }
   const region=usRegion();
-  if(!region)return {error:'该重货渠道需要填写收货地址 ZIP Code 的第一位数字。'};
+  if(!region)return {error:'请输入有效的美国邮编，或留空邮编并填写 ZIP 首位。'};
   if(mode==='us_air_heavy'){
     if(!(weight>=12&&weight<=1000))return {error:'美国空派重货费率适用于 12-1000kg。'};
     const band=weight<=21?0:weight<=70?1:weight<=100?2:3;
@@ -485,10 +519,42 @@ $('copyQuoteBtn').onclick = async () => {
   }
 };
 
+function updateDbWeightEstimate() {
+  const output = $('dbWeightEstimate');
+  const product = PRODUCTS.find(entry => entry.id === $('weightProduct').value);
+  const dimension = $('weightSize').value.trim();
+  const count = Number($('weightQty').value);
+  if (!product || !dimension || !Number.isSafeInteger(count) || count < 1) {
+    output.textContent = '选择品类，填写尺寸和正整数数量后查看重量。';
+    return;
+  }
+  const sizes = matchingWeightSizes(product, dimension);
+  if (sizes.length > 1) {
+    output.textContent = '该尺寸有多种款式，请从建议列表选择完整规格。';
+    return;
+  }
+  const estimate = sizes.length ? estimateCatalogWeight(product, sizes[0], count) : null;
+  output.textContent = estimate
+    ? `参考整批重量 ${weightKg(estimate.kg)} kg · ${estimate.detail}`
+    : '报价库里没有该规格的可用重量记录，可用实际称重核算。';
+}
+
 function buildDb(){
   const names=['全部',...new Set(DB_ROWS.map(r=>r.Product))];
   $('dbProduct').innerHTML=names.map(n=>`<option>${n}</option>`).join('');
   $('dbProduct').onchange=renderDb; $('dbSearch').oninput=renderDb;
+  const productInput = $('weightProduct');
+  productInput.replaceChildren(...PRODUCTS.map(product => new Option(product.name, product.id)));
+  function updateSizeOptions() {
+    const product = PRODUCTS.find(entry => entry.id === productInput.value);
+    $('weightSize').value = '';
+    $('weightSizeOptions').replaceChildren(...product.sizes.map(spec => new Option(spec.label, spec.label)));
+    updateDbWeightEstimate();
+  }
+  productInput.addEventListener('change', updateSizeOptions);
+  $('weightSize').addEventListener('input', updateDbWeightEstimate);
+  $('weightQty').addEventListener('input', updateDbWeightEstimate);
+  updateSizeOptions();
   renderDb();
 }
 function renderDb(){
